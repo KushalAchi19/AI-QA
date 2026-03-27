@@ -1,0 +1,25 @@
+{
+  "analyses": [
+    {
+      "id": 1774614873481,
+      "repo_url": "Code Snippet Debugging",
+      "status": "FAILED",
+      "created_at": "2026-03-27T12:34:33.481Z",
+      "playwright_output": "Failed to analyze snippet via AI: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information."
+    },
+    {
+      "id": 1774615139598,
+      "repo_url": "Code Snippet Debugging",
+      "status": "FAILED",
+      "created_at": "2026-03-27T12:38:59.598Z",
+      "playwright_output": "Failed to analyze snippet via AI: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information."
+    },
+    {
+      "id": 1774625791289,
+      "repo_url": "Code Snippet Debugging",
+      "status": "FAILED",
+      "created_at": "2026-03-27T15:36:31.289Z",
+      "playwright_output": "Failed to analyze snippet via AI: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information."
+    }
+  ]
+}
