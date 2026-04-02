@@ -92,7 +92,7 @@ export default function App() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/analyses');
+      const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyses');
       if (res.ok) {
         const data = await res.json();
         setRuns(data);
@@ -113,7 +113,7 @@ export default function App() {
 
     try {
       if (activeMode === 'github') {
-        const res = await fetch('http://localhost:5000/api/analyze', {
+        const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repoUrl, taskType: 'E2E' })
@@ -123,7 +123,7 @@ export default function App() {
       } else {
         if (!selectedFile) return;
         const code = await selectedFile.text();
-        const res = await fetch('http://localhost:5000/api/analyze-snippet', {
+        const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyze-snippet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code })
@@ -197,8 +197,8 @@ export default function App() {
             {activeMode === 'github' ? (
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                   <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                   <input
+                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                  <input
                     type="text"
                     value={repoUrl}
                     onChange={(e) => setRepoUrl(e.target.value)}
@@ -217,18 +217,18 @@ export default function App() {
               </div>
             ) : (
               <div className="flex flex-col gap-3 relative">
-                <div 
-                   onClick={() => !loading && fileInputRef.current?.click()}
-                   className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 transition-all group ${loading ? 'border-cyan-500/50 bg-cyan-500/5 cursor-wait' : 'border-white/10 cursor-pointer hover:bg-white/5 hover:border-white/20'}`}
+                <div
+                  onClick={() => !loading && fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 transition-all group ${loading ? 'border-cyan-500/50 bg-cyan-500/5 cursor-wait' : 'border-white/10 cursor-pointer hover:bg-white/5 hover:border-white/20'}`}
                 >
-                  <input 
-                    type="file" 
-                    ref={fileInputRef} 
+                  <input
+                    type="file"
+                    ref={fileInputRef}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) setSelectedFile(file);
-                    }} 
-                    className="hidden" 
+                    }}
+                    className="hidden"
                   />
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${loading ? 'bg-cyan-500/20 animate-pulse' : 'bg-white/5 group-hover:scale-110'}`}>
                     <CheckCircle2 className={loading ? 'text-cyan-400' : 'text-slate-500 group-hover:text-emerald-400'} size={20} />
@@ -245,7 +245,7 @@ export default function App() {
 
                 {/* Bottom-Right Diagnostic Trigger */}
                 <div className="absolute right-0 -bottom-16 flex justify-end">
-                   <button
+                  <button
                     type="submit"
                     disabled={loading || !selectedFile}
                     className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-[9px] uppercase tracking-widest py-1.5 px-4 rounded-md transition-all shadow-lg flex items-center gap-2 active:scale-95 whitespace-nowrap"
@@ -283,7 +283,7 @@ export default function App() {
                       <span className="text-[10px] text-white font-bold truncate max-w-[80%]">
                         {fileName}
                       </span>
-                      <button onClick={(e) => { e.stopPropagation(); fetch(`http://localhost:5000/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); fetch(`https://ai-quality-assurance-engineer.onrender.com/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
                     </div>
                     <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${run.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                       {run.status === 'COMPLETED' ? 'Success' : 'Active'}
@@ -303,48 +303,48 @@ export default function App() {
             ) : (
               <div className="flex flex-col gap-4 animate-fade-in">
                 <header className="flex items-center justify-between border-b border-white/5 pb-2 text-white">
-                   <div className="flex items-center gap-2">
-                     <Terminal size={14} className="text-cyan-400" />
-                     <h3 className="text-sm font-black">AI Diagnostic Report</h3>
-                   </div>
-                   <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
+                  <div className="flex items-center gap-2">
+                    <Terminal size={14} className="text-cyan-400" />
+                    <h3 className="text-sm font-black">AI Diagnostic Report</h3>
+                  </div>
+                  <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
                 </header>
 
                 {/* Dynamic Metrics Grid */}
                 {metrics && (
-                   <div className="grid grid-cols-3 gap-2.5 animate-fade-in shrink-0">
-                      {metrics.type === 'snippet' ? (
-                        <>
-                          <div className="bg-red-500/5 border border-red-500/10 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-red-400/70 uppercase font-black tracking-widest mb-0.5">Error Type</span>
-                            <span className="text-sm font-black text-red-400 truncate px-1">{metrics.errorType}</span>
-                          </div>
-                          <div className="bg-amber-500/5 border border-amber-500/10 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-amber-500/70 uppercase font-black tracking-widest mb-0.5">Line Number</span>
-                            <span className="text-sm font-black text-amber-400">{metrics.errorLine}</span>
-                          </div>
-                          <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-emerald-400/70 uppercase font-black tracking-widest mb-0.5">Diagnostic Result</span>
-                            <span className="text-sm font-black text-emerald-400">{metrics.hasFix ? 'Fixed' : 'Analyzed'}</span>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="bg-slate-800/30 border border-white/5 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-slate-500 uppercase font-black tracking-widest mb-0.5">Diagnostic Tests</span>
-                            <span className="text-sm font-black text-white">{metrics.total}</span>
-                          </div>
-                          <div className="bg-slate-800/40 border border-white/5 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-slate-400 uppercase font-black tracking-widest mb-0.5">Execution Time</span>
-                            <span className="text-sm font-black text-slate-200">{metrics.duration}s</span>
-                          </div>
-                          <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
-                            <span className="block text-[7px] text-emerald-400 uppercase font-black tracking-widest mb-0.5">Code Health Score</span>
-                            <span className="text-sm font-black text-emerald-400">98%</span>
-                          </div>
-                        </>
-                      )}
-                   </div>
+                  <div className="grid grid-cols-3 gap-2.5 animate-fade-in shrink-0">
+                    {metrics.type === 'snippet' ? (
+                      <>
+                        <div className="bg-red-500/5 border border-red-500/10 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-red-400/70 uppercase font-black tracking-widest mb-0.5">Error Type</span>
+                          <span className="text-sm font-black text-red-400 truncate px-1">{metrics.errorType}</span>
+                        </div>
+                        <div className="bg-amber-500/5 border border-amber-500/10 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-amber-500/70 uppercase font-black tracking-widest mb-0.5">Line Number</span>
+                          <span className="text-sm font-black text-amber-400">{metrics.errorLine}</span>
+                        </div>
+                        <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-emerald-400/70 uppercase font-black tracking-widest mb-0.5">Diagnostic Result</span>
+                          <span className="text-sm font-black text-emerald-400">{metrics.hasFix ? 'Fixed' : 'Analyzed'}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="bg-slate-800/30 border border-white/5 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-slate-500 uppercase font-black tracking-widest mb-0.5">Diagnostic Tests</span>
+                          <span className="text-sm font-black text-white">{metrics.total}</span>
+                        </div>
+                        <div className="bg-slate-800/40 border border-white/5 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-slate-400 uppercase font-black tracking-widest mb-0.5">Execution Time</span>
+                          <span className="text-sm font-black text-slate-200">{metrics.duration}s</span>
+                        </div>
+                        <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
+                          <span className="block text-[7px] text-emerald-400 uppercase font-black tracking-widest mb-0.5">Code Health Score</span>
+                          <span className="text-sm font-black text-emerald-400">98%</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {/* Classic Linear Report Content */}
@@ -359,12 +359,12 @@ export default function App() {
                             const text = String(children);
                             // Robust detection for "Corrected Solution" regardless of emoji/number prefix
                             if (text.toLowerCase().includes("corrected solution")) {
-                               return (
-                                 <div className="mt-8 mb-3 flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.6)]" />
-                                    <span className="text-[13px] font-black text-emerald-400 uppercase tracking-[0.2em]">Corrected Solution</span>
-                                 </div>
-                               );
+                              return (
+                                <div className="mt-8 mb-3 flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.6)]" />
+                                  <span className="text-[13px] font-black text-emerald-400 uppercase tracking-[0.2em]">Corrected Solution</span>
+                                </div>
+                              );
                             }
                             return (
                               <h3 className="text-[13px] font-black text-white mt-10 mb-5 flex items-center gap-3 group">
@@ -381,36 +381,36 @@ export default function App() {
                           code: ({ node, inline, className, children, ...props }: any) => {
                             const match = /language-(\w+)/.exec(className || '')
                             const codeString = String(children).replace(/\n$/, '');
-                            
+
                             // Check if this is likely the primary fix block (topmost or section 3)
                             const isFixBlock = !node.position?.start.line || node.position?.start.line < 30;
 
                             if (!inline && match) {
                               return (
                                 <div className={`rounded-xl overflow-hidden my-6 border shadow-2xl transition-all ${isFixBlock ? 'border-emerald-500/20 bg-[#0d1414]/80 shadow-[0_0_50px_-15px_rgba(16,185,129,0.1)]' : 'border-white/10 bg-[#0d1117]'}`}>
-                                   <div className={`px-5 py-3.5 flex items-center justify-between border-b ${isFixBlock ? 'border-emerald-500/10 bg-emerald-500/[0.03]' : 'border-white/5 bg-white/5'}`}>
-                                      <div className="flex items-center gap-3">
-                                        {isFixBlock ? <CheckCircle2 size={16} className="text-emerald-400" /> : <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{match[1]} output</div>}
-                                        {isFixBlock && (
-                                           <div>
-                                              <p className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.1em] leading-none">Corrected Solution</p>
-                                              <p className="text-[8px] font-black text-emerald-500/40 uppercase tracking-widest mt-1">READY TO DEPLOY</p>
-                                           </div>
-                                        )}
-                                      </div>
-                                      <button 
-                                        onClick={() => copyToClipboard(codeString, codeString.substring(0, 20))}
-                                        className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[9px] font-black uppercase tracking-[0.15em] transition-all active:scale-90 ${copiedId === codeString.substring(0, 20) ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-400 border border-white/10'}`}
-                                      >
-                                        {copiedId === codeString.substring(0, 20) ? <ClipboardCheck size={12} /> : <Copy size={12} />}
-                                        {copiedId === codeString.substring(0, 20) ? 'Copied' : 'Copy'}
-                                      </button>
-                                   </div>
-                                   <SyntaxHighlighter
-                                      {...props} children={codeString}
-                                      style={codeTheme as any} language={match[1]} PreTag="div"
-                                      customStyle={{ margin: 0, padding: '1.25rem', fontSize: '11px', lineHeight: '1.7', background: 'transparent' }}
-                                   />
+                                  <div className={`px-5 py-3.5 flex items-center justify-between border-b ${isFixBlock ? 'border-emerald-500/10 bg-emerald-500/[0.03]' : 'border-white/5 bg-white/5'}`}>
+                                    <div className="flex items-center gap-3">
+                                      {isFixBlock ? <CheckCircle2 size={16} className="text-emerald-400" /> : <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{match[1]} output</div>}
+                                      {isFixBlock && (
+                                        <div>
+                                          <p className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.1em] leading-none">Corrected Solution</p>
+                                          <p className="text-[8px] font-black text-emerald-500/40 uppercase tracking-widest mt-1">READY TO DEPLOY</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => copyToClipboard(codeString, codeString.substring(0, 20))}
+                                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[9px] font-black uppercase tracking-[0.15em] transition-all active:scale-90 ${copiedId === codeString.substring(0, 20) ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-400 border border-white/10'}`}
+                                    >
+                                      {copiedId === codeString.substring(0, 20) ? <ClipboardCheck size={12} /> : <Copy size={12} />}
+                                      {copiedId === codeString.substring(0, 20) ? 'Copied' : 'Copy'}
+                                    </button>
+                                  </div>
+                                  <SyntaxHighlighter
+                                    {...props} children={codeString}
+                                    style={codeTheme as any} language={match[1]} PreTag="div"
+                                    customStyle={{ margin: 0, padding: '1.25rem', fontSize: '11px', lineHeight: '1.7', background: 'transparent' }}
+                                  />
                                 </div>
                               );
                             }
@@ -434,7 +434,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                
+
                 {activeItem.test_code && (
                   <div className="mt-4 border-t border-white/5 pt-6 animate-fade-in">
                     <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Playwright Test Suite</h4>

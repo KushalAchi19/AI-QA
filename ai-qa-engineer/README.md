@@ -50,7 +50,7 @@ Open a terminal and run:
 cd backend
 npm run dev
 ```
-The backend will start at `http://localhost:5000`.
+The backend will start at `https://ai-quality-assurance-engineer.onrender.com`.
 
 ### Step 2: Start the Frontend (Dashboard)
 Open a **new** terminal and run:
