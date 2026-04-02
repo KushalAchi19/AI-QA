@@ -161,14 +161,14 @@ export default function App() {
         </div>
         <nav className="flex flex-col gap-0.5 flex-1">
           <button
-            onClick={() => setActiveMode('snippet')}
+            onClick={() => { setActiveMode('snippet'); setActiveItemId(null); }}
             className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md font-semibold text-[11px] transition-all ${activeMode === 'snippet' ? 'bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/30' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
           >
             <FileCode size={12} />
             Snippet Diagnostics
           </button>
           <button
-            onClick={() => setActiveMode('github')}
+            onClick={() => { setActiveMode('github'); setActiveItemId(null); }}
             className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md font-semibold text-[11px] transition-all ${activeMode === 'github' ? 'bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/30' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
           >
             <Globe size={12} />
