@@ -1,92 +1,148 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import path from 'path';
-import fs from 'fs';
+import { promises as fs } from 'fs';
+import fsSync from 'fs';
 
-const getAI = () => {
-    if (!process.env.GEMINI_API_KEY) {
+const getModel = () => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
         throw new Error("GEMINI_API_KEY is missing! Please add it to backend/.env");
     }
-    return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const genAI = new GoogleGenerativeAI(apiKey);
+    // Using gemini-2.5-flash as requested by the user
+    return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 };
 
 /**
- * Uses Gemini 2.5 Flash to generate Playwright tests based on code context
+ * Sanitizes AI-generated code by removing markdown block wrappers.
  */
-export async function generateTests(repoUrl: string, repoFiles: any[]) {
-    if (!process.env.GEMINI_API_KEY) {
-        throw new Error("GEMINI_API_KEY is missing! Please add it to backend/.env");
+function sanitizeCode(code: string): string {
+    return code
+        .replace(/^\`\`\`(javascript|typescript|js|ts)?\n/, '')
+        .replace(/\n\`\`\`$/, '')
+        .trim();
+}
+
+/**
+ * Extracts the first code block from a markdown string.
+ */
+function extractCodeBlock(markdown: string): string {
+    const regex = /```(?:javascript|typescript|js|ts)?\n([\s\S]*?)```/i;
+    const match = markdown.match(regex);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    // Fallback: if no code block found, sanitize the whole string
+    return sanitizeCode(markdown);
+}
+
+/**
+ * Generates Playwright tests based on code context using Gemini 2.5 Flash
+ */
+export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean) {
+    const model = getModel();
+
+    const filesContext = repoFiles.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n');
+
+    let headlessPrompt = '';
+    if (isHeadless) {
+        headlessPrompt = `
+### 🚨 CRITICAL INSTRUCTION: Headless Node CLI App Detected 🚨
+The user repository does not contain a frontend UI. However, we have natively wrapped their CLI application inside a DOM emulator at 'http://localhost:3030'.
+You MUST use these explicit selectors to test their CLI application over the DOM:
+- \`page.locator('#cli-output')\` to read the stdout terminal history.
+- \`page.locator('#cli-input')\` to type commands into the terminal.
+- \`page.locator('#cli-submit')\` to send the typed command to the sub-process.
+- ALWAYS wait for the output string to appear using \`await expect(page.locator('#cli-output')).toContainText('expected output', { timeout: 10000 })\`.
+`;
     }
 
-    // For the MVP, we will generate a basic E2E smoke test for the given repo
-    // In a real scenario, we would download the code files and send them as context.
     const prompt = `
-You are an AI QA Engineer. I need you to write a complete Playwright test suite for a web application based on this repository: ${repoUrl}.
-Since this is an E2E test, write a general smoke test that navigates to a hypothetical deployed version of this app (use 'http://localhost:3000' as a placeholder URL) and checks for basic presence of UI elements.
+You are a Senior AI QA Engineer and Principal Developer. I need a comprehensive E2E testing brief, code audit, and Playwright test suite for this repository: ${repoUrl}.
 
-Return ONLY pure JavaScript Playwright code without markdown block wrappers or explanations. The file will be saved as a .spec.ts file.
-Example structure:
-import { test, expect } from '@playwright/test';
-test('basic test', async ({ page }) => { ... });
+### ACTUAL REPOSITORY FILES (Perform a deep audit for logic bugs and security flaws!)
+${filesContext}
+${headlessPrompt}
+
+Please provide your response in these exact sections:
+
+### 🛠️ Corrected Solution
+[If you find logic bugs, provide the FULLY FIXED source code for the primary file here. If no bugs, suggest 1 major performance enhancement with code.]
+
+### 🚩 1. Error Identification
+[List specific logic bugs, security flaws, or syntax errors found during the file audit.]
+
+### 🔍 2. Diagnostic Analysis & Edge Cases
+[Deep dive into why these issues occur and what production edge cases might trigger them.]
+
+### 🚀 3. Playwright Test Suite
+[Provide a complete Playwright test suite in a single markdown code block. 
+- MUST Use 'http://localhost:3030' as the base URL.
+- DO NOT hallucinate CSS selectors; use only elements found in the ACTUAL REPOSITORY FILES.
+- Include the CORRECTED SOURCE CODE from section 1 again below the tests for full context.]
+
+### 💡 4. Best Practices & Roadmap
+[Suggest 2-3 enterprise-grade QA patterns to improve this repository's long-term quality.]
 `;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const fullReport = response.text();
+        const testCode = extractCodeBlock(fullReport);
 
-        let testCode = response.text || '';
-
-        // Clean up markdown block if the model accidentally includes it
-        if (testCode.startsWith('\`\`\`')) {
-            testCode = testCode.replace(/^\`\`\`(javascript|typescript|js|ts)?\n/, '').replace(/\n\`\`\`$/, '');
-        }
-
-        // Save the test to disk so Playwright can execute it
         const testDir = path.join(__dirname, '..', 'tests-generated');
-        if (!fs.existsSync(testDir)) {
-            fs.mkdirSync(testDir, { recursive: true });
+        if (!fsSync.existsSync(testDir)) {
+            await fs.mkdir(testDir, { recursive: true });
         }
 
         const fileName = `generated-${Date.now()}.spec.ts`;
         const filePath = path.join(testDir, fileName);
-        fs.writeFileSync(filePath, testCode, 'utf8');
+        await fs.writeFile(filePath, testCode, 'utf8');
 
-        return { fileName, filePath, code: testCode };
+        return { fileName, filePath, code: testCode, fullReport };
     } catch (error: any) {
         console.error("Error generating test UI:", error);
-        throw new Error("Failed to generate tests via AI.");
+        throw new Error(`Failed to generate tests via AI: ${error.message}`);
     }
 }
 
 export async function analyzeErrorSnippet(code: string) {
-    if (!process.env.GEMINI_API_KEY) {
-        throw new Error("GEMINI_API_KEY is missing! Please add it to backend/.env");
-    }
+    const model = getModel();
 
-    const prompt = `You are a Senior Principal Engineer and QA Specialist reviewing a file uploaded by a developer.
-Your task is to exhaustively analyze the file content below.
+    const prompt = `You are a Senior Principal Engineer and QA Specialist.
+Analyze the following code for logic bugs, syntax errors, and edge cases.
 
 File Content:
 \`\`\`
 ${code}
 \`\`\`
 
-Strictly adhere to this response format:
-### 1. Root Cause & Edge Cases
-Identify any logic bugs, syntax errors, or anti-patterns in the code. Describe what happens when typical or extreme edge cases are run against it.
+Strictly adhere to this response format with these headers:
 
-### 2. Corrected Source Code
-Provide the fully fixed, optimized, and ready-to-run code in a single, properly formatted markdown code block. Do not just leave comments; write out the complete file solution.`;
+### 1. Corrected Solution
+[The fully fixed, optimized, and ready-to-run code in a single markdown code block with the correct language identifier.]
+
+### 2. Error Identification
+- **Error Type**: [e.g., NullPointerException, Logic Bug, Syntax Error]
+- **Line Number**: [The exact line where the issue starts]
+- **Summary**: [Brief description of the impact]
+
+### 3. Diagnostic Analysis & Edge Cases
+[Deep dive into why the error occurs and what edge cases trigger it. Use bullet points for readability.]
+
+### 4. Corrected Source Code
+[Provide the same corrected code as in section 1 here for continuity in the technical flow.]
+
+### 5. Best Practices & Optimization
+[Suggest 1-2 professional patterns to avoid this error in the future.]`;
 
     try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        return response.text || 'No explanation generated.';
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text() || 'No explanation generated.';
     } catch (error: any) {
         console.error("Error analyzing snippet via AI:", error);
-        throw new Error("Failed to analyze snippet via AI: " + error.message);
+        throw new Error(`Failed to analyze snippet via AI: ${error.message}`);
     }
 }

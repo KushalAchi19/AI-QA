@@ -1,7 +1,10 @@
-/* Safely removed the Tailwind v4 import to prevent crashing if the user's Vite setup doesn't support the experimental flag */
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 body {
-    background-color: #0b0f19;
-    color: #e2e8f0;
+    background: radial-gradient(circle at 50% 0%, #111827 0%, #0f172a 45%, #020617 100%);
+    background-attachment: fixed;
+    color: #f8fafc;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
 }
@@ -17,6 +20,7 @@ body {
 .gradient-text {
   background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -29,4 +33,67 @@ body {
 
 .pulsing-border {
   animation: glow 2s infinite ease-in-out;
+}
+
+/* 📝 Markdown Readability & Highlights */
+.prose-report {
+  @apply text-slate-300 leading-relaxed;
+}
+
+.prose-report h1 {
+  @apply text-xl font-black text-white uppercase tracking-wider mb-6 pb-2 border-b border-white/10;
+  background: linear-gradient(to right, #fff, rgba(255,255,255,0.4));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.prose-report h2 {
+  @apply text-lg font-extrabold text-cyan-400 mt-8 mb-3 flex items-center gap-2;
+}
+
+.prose-report h3 {
+  @apply text-sm font-bold text-indigo-300 mt-6 mb-2 uppercase tracking-tight;
+}
+
+.prose-report p {
+  @apply mb-4 leading-7 opacity-90;
+}
+
+.prose-report strong {
+  @apply text-cyan-300 font-bold px-1 rounded bg-cyan-500/5;
+}
+
+.prose-report ul, .prose-report ol {
+  @apply mb-5 space-y-2 border-l border-white/5 pl-4;
+}
+
+.prose-report li {
+  @apply relative pl-1;
+}
+
+.prose-report li::marker {
+  @apply text-indigo-400 font-black;
+}
+
+.prose-report blockquote {
+  @apply italic border-l-4 border-indigo-500/50 bg-indigo-500/5 px-4 py-2 my-4 rounded-r-md text-slate-400;
+}
+
+.prose-report hr {
+  @apply my-8 border-white/5;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }

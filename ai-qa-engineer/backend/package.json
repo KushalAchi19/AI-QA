@@ -10,17 +10,20 @@
   },
   "dependencies": {
     "@google/genai": "latest",
+    "@google/generative-ai": "^0.24.1",
     "@playwright/test": "latest",
     "axios": "latest",
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
-    "playwright": "latest"
+    "playwright": "latest",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/cors": "latest",
     "@types/express": "latest",
     "@types/node": "latest",
+    "@types/uuid": "^10.0.0",
     "ts-node": "latest",
     "ts-node-dev": "latest",
     "typescript": "latest"
