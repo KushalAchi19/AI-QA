@@ -48,15 +48,18 @@ const parseAnalysisMetrics = (run: AnalysisRun) => {
         const passed = stats.expected || 0;
         const failed = stats.unexpected || 0;
         const skipped = (stats.skipped || 0) + (stats.flaky || 0);
+        const total = passed + failed + skipped;
+        const score = total > 0 ? Math.round((passed / total) * 100) : 0;
         return {
           type: 'playwright',
-          total: passed + failed + skipped,
-          duration: ((stats.duration || 0) / 1000).toFixed(1),
+          total,
+          duration: run.total_duration ? run.total_duration.toFixed(1) : ((stats.duration || 0) / 1000).toFixed(1),
+          score: score,
           executionLog: data.executionLog || ""
         };
       }
     } catch (e) { return null; }
-    return { type: 'playwright', total: 0, duration: '0', executionLog: "" };
+    return { type: 'playwright', total: 0, duration: run.total_duration?.toFixed(1) || '0', score: 0, executionLog: "" };
   }
 
   const output = run.playwright_output;
@@ -354,7 +357,7 @@ export default function App() {
                         </div>
                         <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
                           <span className="block text-[7px] text-emerald-400 uppercase font-black tracking-widest mb-0.5">Code Health Score</span>
-                          <span className="text-sm font-black text-emerald-400">98%</span>
+                          <span className="text-sm font-black text-emerald-400">{metrics.score}%</span>
                         </div>
                       </>
                     )}

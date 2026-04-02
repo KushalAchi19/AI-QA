@@ -89,7 +89,10 @@ Please provide your response in these exact sections:
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const fullReport = response.text();
-        const testCode = extractCodeBlock(fullReport);
+        
+        // Find the "Playwright Test Suite" section specifically to avoid extracting source code by accident
+        const playwrightSection = fullReport.split(/### 🚀 3\. Playwright Test Suite/i)[1] || fullReport;
+        const testCode = extractCodeBlock(playwrightSection);
 
         const testDir = path.join(__dirname, '..', 'tests-generated');
         if (!fsSync.existsSync(testDir)) {

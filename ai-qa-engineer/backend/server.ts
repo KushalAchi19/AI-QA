@@ -56,6 +56,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
     }
 
     try {
+        const startTime = Date.now();
         // 1. Initialize Record
         const analysisId = await createAnalysis(repoUrl, clientId);
 
@@ -104,7 +105,8 @@ ${JSON.stringify(testResult, null, 2)}
 `;
                     await updateAnalysis(analysisId, {
                         status: 'COMPLETED',
-                        playwright_output: reportWithResults
+                        playwright_output: reportWithResults,
+                        total_duration: (Date.now() - startTime) / 1000
                     });
                 } finally {
                     // Cleanup server process
