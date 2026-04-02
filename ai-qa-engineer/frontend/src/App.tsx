@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import './index.css';
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 // --- TYPES ---
 interface AnalysisRun {
   id: string;
@@ -92,7 +94,7 @@ export default function App() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyses');
+      const res = await fetch(`${API_URL}/api/analyses`);
       if (res.ok) {
         const data = await res.json();
         setRuns(data);
@@ -113,7 +115,7 @@ export default function App() {
 
     try {
       if (activeMode === 'github') {
-        const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyze', {
+        const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repoUrl, taskType: 'E2E' })
@@ -123,7 +125,7 @@ export default function App() {
       } else {
         if (!selectedFile) return;
         const code = await selectedFile.text();
-        const res = await fetch('https://ai-quality-assurance-engineer.onrender.com/api/analyze-snippet', {
+        const res = await fetch(`${API_URL}/api/analyze-snippet`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code })
@@ -283,7 +285,7 @@ export default function App() {
                       <span className="text-[10px] text-white font-bold truncate max-w-[80%]">
                         {fileName}
                       </span>
-                      <button onClick={(e) => { e.stopPropagation(); fetch(`https://ai-quality-assurance-engineer.onrender.com/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
                     </div>
                     <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${run.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                       {run.status === 'COMPLETED' ? 'Success' : 'Active'}

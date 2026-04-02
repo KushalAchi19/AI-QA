@@ -36,6 +36,12 @@ npm install
 # In frontend
 cd ../frontend
 npm install
+
+# 3. Configure Frontend Environment
+Create a `.env` file in the `frontend` directory with:
+```bash
+VITE_API_URL=https://ai-quality-assurance-engineer.onrender.com
+```
 ```
 
 ---
