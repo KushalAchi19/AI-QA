@@ -287,8 +287,12 @@ export default function App() {
                       </span>
                       <button onClick={(e) => { e.stopPropagation(); fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
                     </div>
-                    <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${run.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
-                      {run.status === 'COMPLETED' ? 'Success' : 'Active'}
+                    <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
+                      run.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                      run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                      'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    }`}>
+                      {run.status === 'COMPLETED' ? 'Success' : run.status === 'FAILED' ? 'Failed' : 'Active'}
                     </div>
                   </div>
                 );
