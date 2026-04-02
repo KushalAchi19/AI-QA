@@ -53,13 +53,16 @@ const parseAnalysisMetrics = (run: AnalysisRun) => {
         return {
           type: 'playwright',
           total,
+          passed,
+          failed,
+          skipped,
           duration: run.total_duration ? run.total_duration.toFixed(1) : ((stats.duration || 0) / 1000).toFixed(1),
-          score: score,
+          framework: run.framework_signature || 'Unknown Tech Stack',
           executionLog: data.executionLog || ""
         };
       }
     } catch (e) { return null; }
-    return { type: 'playwright', total: 0, duration: run.total_duration?.toFixed(1) || '0', score: 0, executionLog: "" };
+    return { type: 'playwright', total: 0, passed: 0, failed: 0, skipped: 0, duration: run.total_duration?.toFixed(1) || '0', framework: run.framework_signature || 'Detecting...', executionLog: "" };
   }
 
   const output = run.playwright_output;
@@ -346,20 +349,16 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      <>
-                        <div className="bg-slate-800/30 border border-white/5 p-2 rounded-lg text-center shadow-lg">
-                          <span className="block text-[7px] text-slate-500 uppercase font-black tracking-widest mb-0.5">Diagnostic Tests</span>
-                          <span className="text-sm font-black text-white">{metrics.total}</span>
-                        </div>
-                        <div className="bg-slate-800/40 border border-white/5 p-2 rounded-lg text-center shadow-lg">
+                      <div className="flex gap-2.5 animate-fade-in shrink-0 w-full">
+                        <div className="flex-1 bg-slate-800/40 border border-white/5 p-2 rounded-lg text-center shadow-lg">
                           <span className="block text-[7px] text-slate-400 uppercase font-black tracking-widest mb-0.5">Execution Time</span>
                           <span className="text-sm font-black text-slate-200">{metrics.duration}s</span>
                         </div>
-                        <div className="bg-emerald-500/5 border border-emerald-500/10 p-2 rounded-lg text-center shadow-lg">
-                          <span className="block text-[7px] text-emerald-400 uppercase font-black tracking-widest mb-0.5">Code Health Score</span>
-                          <span className="text-sm font-black text-emerald-400">{metrics.score}%</span>
+                        <div className="flex-1 bg-slate-800/30 border border-white/5 p-2 rounded-lg text-center shadow-lg overflow-hidden">
+                          <span className="block text-[7px] text-slate-500 uppercase font-black tracking-widest mb-0.5">Framework Signature</span>
+                          <span className="text-sm font-black text-cyan-400 truncate block px-1">{metrics.framework}</span>
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}

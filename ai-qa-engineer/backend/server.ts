@@ -77,7 +77,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                     prepareEnvironment(cloneFolder, isHeadless)
                 ]);
 
-                const { fileName, code, fullReport } = aiResult;
+                const { fileName, code, fullReport, frameworkSignature } = aiResult;
                 const { serverProcess, executionLog, error: envError } = envResult;
 
                 if (envError) throw new Error(envError);
@@ -86,7 +86,8 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                     status: 'TESTS_GENERATED',
                     test_file: fileName,
                     test_code: code,
-                    playwright_output: fullReport
+                    playwright_output: fullReport,
+                    framework_signature: frameworkSignature
                 });
 
                 // 4. Run the generated test natively (against the already-booted server)

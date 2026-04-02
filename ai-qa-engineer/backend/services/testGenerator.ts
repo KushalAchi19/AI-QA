@@ -66,6 +66,9 @@ ${headlessPrompt}
 
 Please provide your response in these exact sections:
 
+### 🧩 Framework Signature
+[Provide a short 2-3 word identifier of the primary tech stack, e.g., 'React / Vite', 'Java / Maven', 'Node / Express'.]
+
 ### 🛠️ Corrected Solution
 [If you find logic bugs, provide the FULLY FIXED source code for the primary file here. If no bugs, suggest 1 major performance enhancement with code.]
 
@@ -90,6 +93,10 @@ Please provide your response in these exact sections:
         const response = await result.response;
         const fullReport = response.text();
         
+        // Extract Framework Signature specifically
+        const frameworkSection = fullReport.match(/### 🧩 Framework Signature\n+([^\n#]+)/i);
+        const frameworkSignature = frameworkSection ? frameworkSection[1].trim() : 'Unknown';
+
         // Find the "Playwright Test Suite" section specifically to avoid extracting source code by accident
         const playwrightSection = fullReport.split(/### 🚀 3\. Playwright Test Suite/i)[1] || fullReport;
         const testCode = extractCodeBlock(playwrightSection);
@@ -103,7 +110,7 @@ Please provide your response in these exact sections:
         const filePath = path.join(testDir, fileName);
         await fs.writeFile(filePath, testCode, 'utf8');
 
-        return { fileName, filePath, code: testCode, fullReport };
+        return { fileName, filePath, code: testCode, fullReport, frameworkSignature };
     } catch (error: any) {
         console.error("Error generating test UI:", error);
         throw new Error(`Failed to generate tests via AI: ${error.message}`);

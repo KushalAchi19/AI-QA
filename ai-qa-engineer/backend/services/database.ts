@@ -15,6 +15,7 @@ export interface AnalysisRecord {
     test_code?: string;
     playwright_output?: string;
     total_duration?: number;
+    framework_signature?: string;
 }
 
 interface Database {
