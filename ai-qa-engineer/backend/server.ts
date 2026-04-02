@@ -1,3 +1,17 @@
+import express from "express";
+import cors from "cors";
+
+const app = express();
+
+// CORS FIX (allow your Vercel frontend)
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
+}));
+
+app.use(express.json());
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -39,7 +53,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
     try {
         // 1. Initialize Record
         const analysisId = await createAnalysis(repoUrl);
-        
+
         // Send immediate response so frontend doesn't hang
         res.json({ message: 'Analysis started', analysisId, status: 'GENERATING_TESTS' });
 
@@ -48,10 +62,10 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
             try {
                 // 2. Fetch repo metadata and clone (Shallow)
                 const { files, cloneFolder, isHeadless } = await analyzeRepository(repoUrl, analysisId);
-                
+
                 // 3. THE SPEED RACE: Generate AI tests AND Prepare the Environment at the same time!
                 await updateAnalysis(analysisId, { status: 'GENERATING_TESTS' });
-                
+
                 const [aiResult, envResult] = await Promise.all([
                     generateTests(repoUrl, files, cloneFolder, isHeadless),
                     prepareEnvironment(cloneFolder, isHeadless)
@@ -62,18 +76,18 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
 
                 if (envError) throw new Error(envError);
 
-                await updateAnalysis(analysisId, { 
-                    status: 'TESTS_GENERATED', 
-                    test_file: fileName, 
+                await updateAnalysis(analysisId, {
+                    status: 'TESTS_GENERATED',
+                    test_file: fileName,
                     test_code: code,
-                    playwright_output: fullReport 
+                    playwright_output: fullReport
                 });
 
                 // 4. Run the generated test natively (against the already-booted server)
                 await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
                 try {
                     const testResult = await runPlaywrightTest(fileName, executionLog);
-                    
+
                     // 5. Store Final Results
                     const reportWithResults = `
 ${fullReport}
@@ -83,9 +97,9 @@ ${fullReport}
 ${JSON.stringify(testResult, null, 2)}
 \`\`\`
 `;
-                    await updateAnalysis(analysisId, { 
+                    await updateAnalysis(analysisId, {
                         status: 'COMPLETED',
-                        playwright_output: reportWithResults 
+                        playwright_output: reportWithResults
                     });
                 } finally {
                     // Cleanup server process
@@ -100,7 +114,7 @@ ${JSON.stringify(testResult, null, 2)}
 
             } catch (asyncError: any) {
                 console.error(`Async Error during analysis ${analysisId}:`, asyncError);
-                await updateAnalysis(analysisId, { 
+                await updateAnalysis(analysisId, {
                     status: 'FAILED',
                     playwright_output: asyncError.message
                 });
@@ -125,15 +139,15 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
         (async () => {
             try {
                 const aiExplanation = await analyzeErrorSnippet(code);
-                
-                await updateAnalysis(analysisId, { 
+
+                await updateAnalysis(analysisId, {
                     status: 'COMPLETED',
                     test_code: code,
                     playwright_output: aiExplanation
                 });
             } catch (asyncError: any) {
                 console.error(`Async Error during snippet analysis ${analysisId}:`, asyncError);
-                await updateAnalysis(analysisId, { 
+                await updateAnalysis(analysisId, {
                     status: 'FAILED',
                     playwright_output: asyncError.message
                 });
@@ -162,7 +176,7 @@ app.delete('/api/analyses/:id', async (req: Request, res: Response, next: NextFu
 // Global Error Handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     console.error("Unhandled Backend Error:", err);
-    res.status(500).json({ 
+    res.status(500).json({
         error: err.message || 'Internal Server Error',
         stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
