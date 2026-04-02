@@ -34,10 +34,11 @@ app.get('/', (req, res) => {
     );
 });
 
-// Get all previous analyses
+// Get all previous analyses (filtered by clientId)
 app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const history = await getAnalyses();
+        const { clientId } = req.query;
+        const history = await getAnalyses(clientId as string);
         res.json(history);
     } catch (error) {
         next(error);
@@ -46,14 +47,17 @@ app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction)
 
 // Run a new repository analysis and test generation
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl } = req.body;
+    const { repoUrl, clientId } = req.body;
     if (!repoUrl) {
         return res.status(400).json({ error: 'repoUrl is required' });
+    }
+    if (!clientId) {
+        return res.status(400).json({ error: 'clientId is required' });
     }
 
     try {
         // 1. Initialize Record
-        const analysisId = await createAnalysis(repoUrl);
+        const analysisId = await createAnalysis(repoUrl, clientId);
 
         // Send immediate response so frontend doesn't hang
         res.json({ message: 'Analysis started', analysisId, status: 'GENERATING_TESTS' });
@@ -128,13 +132,16 @@ ${JSON.stringify(testResult, null, 2)}
 });
 
 app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextFunction) => {
-    const { code } = req.body;
+    const { code, clientId } = req.body;
     if (!code) {
         return res.status(400).json({ error: 'code snippet is required' });
     }
+    if (!clientId) {
+        return res.status(400).json({ error: 'clientId is required for session isolation' });
+    }
 
     try {
-        const analysisId = await createAnalysis('Code Snippet Debugging');
+        const analysisId = await createAnalysis('Code Snippet Debugging', clientId);
         res.json({ message: 'Analysis started', analysisId, status: 'ANALYZING' });
 
         (async () => {

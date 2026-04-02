@@ -7,6 +7,7 @@ const DB_FILE = path.join(__dirname, '..', 'ai-qa.json');
 
 export interface AnalysisRecord {
     id: string;
+    client_id: string;
     repo_url: string;
     status: 'STARTED' | 'GENERATING_TESTS' | 'TESTS_GENERATED' | 'RUNNING_TESTS' | 'COMPLETED' | 'FAILED' | 'ANALYSING';
     created_at: string;
@@ -52,11 +53,12 @@ async function writeDb(data: Database) {
     }
 }
 
-export async function createAnalysis(repoUrl: string): Promise<string> {
+export async function createAnalysis(repoUrl: string, clientId: string): Promise<string> {
     const db = await readDb();
     const newId = uuidv4();
     const newRecord: AnalysisRecord = {
         id: newId,
+        client_id: clientId,
         repo_url: repoUrl,
         status: 'STARTED',
         created_at: new Date().toISOString()
@@ -75,9 +77,13 @@ export async function updateAnalysis(id: string, updates: Partial<AnalysisRecord
     }
 }
 
-export async function getAnalyses(): Promise<AnalysisRecord[]> {
+export async function getAnalyses(clientId?: string): Promise<AnalysisRecord[]> {
     const db = await readDb();
-    return db.analyses.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    let results = db.analyses;
+    if (clientId) {
+        results = results.filter(a => a.client_id === clientId);
+    }
+    return results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
 export async function deleteAnalysis(id: string) {

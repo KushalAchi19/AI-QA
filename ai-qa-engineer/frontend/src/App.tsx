@@ -94,7 +94,8 @@ export default function App() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/analyses`);
+      const clientId = localStorage.getItem('ai-qa-client-id');
+      const res = await fetch(`${API_URL}/api/analyses?clientId=${clientId}`);
       if (res.ok) {
         const data = await res.json();
         setRuns(data);
@@ -103,6 +104,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Generate or retrieve a persistent client ID for this browser
+    if (!localStorage.getItem('ai-qa-client-id')) {
+      const newId = `cli-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`;
+      localStorage.setItem('ai-qa-client-id', newId);
+    }
     fetchHistory();
     const interval = setInterval(fetchHistory, 5000);
     return () => clearInterval(interval);
@@ -113,12 +119,14 @@ export default function App() {
     setErrorText('');
     setLoading(true);
 
+    const clientId = localStorage.getItem('ai-qa-client-id');
+
     try {
       if (activeMode === 'github') {
         const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl, taskType: 'E2E' })
+          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId })
         });
         if (!res.ok) throw new Error("Analysis failed to start");
         setRepoUrl('');
@@ -128,7 +136,7 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/analyze-snippet`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code })
+          body: JSON.stringify({ code, clientId })
         });
         if (!res.ok) throw new Error("Snippet check failed");
         setSelectedFile(null);
