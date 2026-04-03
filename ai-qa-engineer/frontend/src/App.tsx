@@ -387,7 +387,7 @@ export default function App() {
                                 <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 text-indigo-300 group-hover:from-indigo-500/30 group-hover:to-purple-500/30 transition-all shadow-lg border border-white/5">
                                   <ChevronRight size={14} className="rotate-[-45deg] drop-shadow-[0_0_3px_rgba(129,140,248,0.5)]" strokeWidth={3} />
                                 </span>
-                                <span className="tracking-tight uppercase">{children.toString().replace(/[🚀📋🛠️🚩🔍💡🖥️✅]/g, '').trim()}</span>
+                                <span className="tracking-tight uppercase">{children.toString().replace(/[🚀📋🛠️🚩🔍💡🖥️✅⚙️]/g, '').trim()}</span>
                               </h3>
                             );
                           },

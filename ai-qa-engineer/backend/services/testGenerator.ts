@@ -72,17 +72,16 @@ Please provide your response in these exact sections:
 ### 🛠️ Corrected Solution
 [If you find logic bugs, provide the FULLY FIXED source code for the primary file here. If no bugs, suggest 1 major performance enhancement with code.]
 
-### 🚩 1. Error Identification
-[List specific logic bugs, security flaws, or syntax errors found during the file audit.]
+### 📋 1. EXECUTIVE SUMMARY
+[Write 2-3 professional prose paragraphs summarizing: what this application does, its overall architecture (frontend framework, data layer, key patterns), and a high-level quality assessment — strengths, risks, and notable characteristics. Do NOT use bullet points here; write in clear, authoritative engineering prose.]
 
-### 🔍 2. Diagnostic Analysis & Edge Cases
-[Deep dive into why these issues occur and what production edge cases might trigger them.]
+### ⚙️ 2. TESTING STRATEGY
+[Provide a structured smoke-test plan. Start with a single sentence: "Components/Routes Prioritized for Smoke Test:" then list each key feature or route as a bold subheading (e.g., **Note Addition (Create):**). Under each subheading include exactly two bullet points: "- **Rationale:** [why this is critical to test]" and "- **Scenario:** [concrete step-by-step test scenario]". Close with 1-2 sentences on what broader testing would follow after smoke tests pass.]
 
 ### 🚀 3. Playwright Test Suite
 [Provide a complete Playwright test suite in a single markdown code block. 
 - MUST Use 'http://localhost:3030' as the base URL.
-- DO NOT hallucinate CSS selectors; use only elements found in the ACTUAL REPOSITORY FILES.
-- Include the CORRECTED SOURCE CODE from section 1 again below the tests for full context.]
+- DO NOT hallucinate CSS selectors; use only elements found in the ACTUAL REPOSITORY FILES.]
 
 ### 💡 4. Best Practices & Roadmap
 [Suggest 2-3 enterprise-grade QA patterns to improve this repository's long-term quality.]

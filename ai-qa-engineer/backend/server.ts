@@ -93,20 +93,12 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                 // 4. Run the generated test natively (against the already-booted server)
                 await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
                 try {
-                    const testResult = await runPlaywrightTest(fileName, executionLog);
+                    await runPlaywrightTest(fileName, executionLog);
 
                     // 5. Store Final Results
-                    const reportWithResults = `
-${fullReport}
-
-### 🖥️ 5. Execution Results
-\`\`\`json
-${JSON.stringify(testResult, null, 2)}
-\`\`\`
-`;
                     await updateAnalysis(analysisId, {
                         status: 'COMPLETED',
-                        playwright_output: reportWithResults,
+                        playwright_output: fullReport,
                         total_duration: (Date.now() - startTime) / 1000
                     });
                 } finally {
