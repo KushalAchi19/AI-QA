@@ -48,7 +48,7 @@ app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction)
 
 // Run a new repository analysis and test generation
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, clientId, framework = 'playwright' } = req.body;
+    const { repoUrl, clientId, framework = 'playwright', githubToken } = req.body;
     if (!repoUrl) {
         return res.status(400).json({ error: 'repoUrl is required' });
     }
@@ -68,7 +68,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
         (async () => {
             try {
                 // 2. Fetch repo metadata and clone (Shallow)
-                const { files, cloneFolder, isHeadless } = await analyzeRepository(repoUrl, analysisId);
+                const { files, cloneFolder, isHeadless } = await analyzeRepository(repoUrl, analysisId, githubToken);
 
                 // 3. Run Diagnostic Analysis (AI Part)
                 // This is the blocking part that the user waits for (takes ~10-15s)

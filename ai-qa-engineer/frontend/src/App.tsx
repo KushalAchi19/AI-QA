@@ -99,6 +99,13 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
+  const [showTokenInput, setShowTokenInput] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('ai-qa-github-token', githubToken);
+  }, [githubToken]);
+
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -171,11 +178,52 @@ export default function App() {
     try {
       const clientId = localStorage.getItem('ai-qa-client-id');
       const res = await fetch(`${API_URL}/api/analyses?clientId=${clientId}`);
+      let serverRuns: AnalysisRun[] = [];
+      
       if (res.ok) {
-        const data = await res.json();
-        setRuns(data);
+        serverRuns = await res.json();
       }
-    } catch (e) { console.error(e); }
+
+      // --- LOCAL VAULT PERSISTENCE (FIX FOR VANISHING REPORTS) ---
+      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+      let localVault: AnalysisRun[] = localVaultRaw ? JSON.parse(localVaultRaw) : [];
+
+      // Update vault with any new completed runs from server
+      serverRuns.forEach(serverRun => {
+        if (serverRun.status === 'COMPLETED' || serverRun.status === 'FAILED') {
+          const index = localVault.findIndex(v => v.id === serverRun.id);
+          if (index > -1) {
+            localVault[index] = serverRun;
+          } else {
+            localVault.unshift(serverRun);
+          }
+        }
+      });
+
+      // Limit vault size to ~50 reports to stay under localStorage 5MB limit
+      if (localVault.length > 50) localVault = localVault.slice(0, 50);
+      localStorage.setItem('ai-qa-local-vault', JSON.stringify(localVault));
+
+      // Merge: Active server runs + Persistent local vault
+      const mergedRuns = [...serverRuns.filter(s => s.status !== 'COMPLETED' && s.status !== 'FAILED')];
+      
+      // Add local vault items, avoiding duplicates
+      localVault.forEach(vaultRun => {
+        if (!mergedRuns.find(m => m.id === vaultRun.id)) {
+          mergedRuns.push(vaultRun);
+        }
+      });
+
+      // Sort by date (newest first)
+      mergedRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      setRuns(mergedRuns);
+    } catch (e) { 
+      console.error("History fetch error:", e);
+      // Fallback to vault only if server is down
+      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+      if (localVaultRaw) setRuns(JSON.parse(localVaultRaw));
+    }
   };
 
   useEffect(() => {
@@ -184,6 +232,11 @@ export default function App() {
       const newId = `cli-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`;
       localStorage.setItem('ai-qa-client-id', newId);
     }
+    
+    // Initial load from vault for instant responsiveness
+    const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+    if (localVaultRaw) setRuns(JSON.parse(localVaultRaw));
+
     fetchHistory();
     const interval = setInterval(fetchHistory, 5000);
     return () => clearInterval(interval);
@@ -201,7 +254,7 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework })
+          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework, githubToken })
         });
         if (!res.ok) throw new Error("Analysis failed to start");
         setRepoUrl('');
@@ -264,9 +317,24 @@ export default function App() {
       <main className="flex-1 p-3 flex flex-col gap-2.5 h-screen overflow-y-auto">
         <header className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-extrabold text-white tracking-tight">Autonomous QA Platform</h2>
-            <p className="text-[10px] text-slate-400 font-medium">Fast, parallelized test generation and code diagnostics.</p>
+            <h2 className="text-base font-extrabold text-white tracking-tight">
+              {activeMode === 'github' ? 'Autonomous QA Platform' : 'Code Diagnostic Engine'}
+            </h2>
+            <p className="text-[10px] text-slate-400 font-medium">
+              {activeMode === 'github' ? 'Fast, parallelized test generation and code diagnostics.' : 'Analyze snippets for logic bugs and edge cases.'}
+            </p>
           </div>
+          {activeMode === 'github' && (
+            <button 
+              onClick={() => setShowTokenInput(!showTokenInput)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.2 rounded-md border text-[10px] font-bold transition-all ${
+                githubToken ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+              }`}
+            >
+              <Lock size={10} className={githubToken ? 'animate-pulse' : ''} />
+              {githubToken ? 'Authenticated' : 'Secure Access'}
+            </button>
+          )}
         </header>
 
         {errorText && (
@@ -278,6 +346,22 @@ export default function App() {
 
         {/* Input Panel */}
         <section className="bg-white/5 rounded-lg p-4 border border-white/10 shadow-xl">
+          {showTokenInput && activeMode === 'github' && (
+            <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-black/40 border border-white/10 mb-4 animate-in fade-in slide-in-from-top-1">
+              <div className="flex justify-between items-center mb-0.5">
+                <label className="text-[9px] uppercase font-black text-slate-500 tracking-widest">GitHub Personal Access Token (PAT)</label>
+                <span className="text-[8px] text-slate-600 font-bold">Stored Locally</span>
+              </div>
+              <input 
+                type="password"
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                className="bg-black/60 border border-white/10 rounded-md px-3 py-2 text-[11px] focus:outline-none focus:border-emerald-500/50 transition-all text-emerald-400 font-mono placeholder:text-slate-800"
+              />
+              <p className="text-[9px] text-slate-500 italic mt-0.5">Required for private repositories. Grants the AI read-access to analyze your proprietary code.</p>
+            </div>
+          )}
           <form onSubmit={handleStart} className="flex flex-col gap-3">
             {activeMode === 'github' ? (
               <div className="flex gap-2">
@@ -379,7 +463,19 @@ export default function App() {
                       <span className="text-[10px] text-white font-bold truncate max-w-[80%]">
                         {fileName}
                       </span>
-                      <button onClick={(e) => { e.stopPropagation(); fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => fetchHistory()); }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
+                      <button onClick={(e) => { 
+                        e.stopPropagation(); 
+                        fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
+                          // Also remove from local vault
+                          const vaultRaw = localStorage.getItem('ai-qa-local-vault');
+                          if (vaultRaw) {
+                            const vault = JSON.parse(vaultRaw);
+                            const newVault = vault.filter((v: any) => v.id !== run.id);
+                            localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
+                          }
+                          fetchHistory();
+                        }); 
+                      }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
                     </div>
                     <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
                       (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
