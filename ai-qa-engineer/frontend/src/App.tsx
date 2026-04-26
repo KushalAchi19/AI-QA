@@ -110,7 +110,8 @@ export default function App() {
   const metrics = useMemo(() => {
     if (!activeItem) return null;
     const m = parseAnalysisMetrics(activeItem);
-    if (m && m.type === 'playwright' && activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED') {
+    // Only run the live timer if the backend hasn't saved a total_duration yet
+    if (m && m.type === 'playwright' && !activeItem.total_duration && activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED') {
       const start = new Date(activeItem.created_at).getTime();
       m.duration = ((now - start) / 1000).toFixed(1);
     }
