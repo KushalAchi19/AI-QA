@@ -162,7 +162,8 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
     }
 });
 
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFunction) => {
     const { html } = req.body;
@@ -173,8 +174,11 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
     let browser;
     try {
         browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
         });
         const page = await browser.newPage();
         

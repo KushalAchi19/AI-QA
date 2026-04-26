@@ -12,12 +12,13 @@
     "@google/genai": "latest",
     "@google/generative-ai": "^0.24.1",
     "@playwright/test": "latest",
+    "@sparticuz/chromium": "^147.0.2",
     "axios": "latest",
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
     "playwright": "latest",
-    "puppeteer": "^24.42.0",
+    "puppeteer-core": "^24.42.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
