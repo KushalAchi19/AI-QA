@@ -95,24 +95,36 @@ export default function App() {
   const [errorText, setErrorText] = useState('');
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
   const metrics = useMemo(() => activeItem ? parseAnalysisMetrics(activeItem) : null, [activeItem]);
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const element = document.getElementById('report-container');
-    if (!element) return;
+    if (!element || isExporting) return;
     
-    const opt = {
-      margin:       10,
-      filename:     'AI-Diagnostic-Report.pdf',
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b0f19' },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+    setIsExporting(true);
     
-    html2pdf().set(opt).from(element).save();
+    // Give the UI 100ms to update the button state before blocking the main thread
+    setTimeout(async () => {
+      try {
+        const opt = {
+          margin:       10,
+          filename:     'AI-Diagnostic-Report.pdf',
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 1.5, useCORS: true, backgroundColor: '#0b0f19', scrollY: 0, logging: false },
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        
+        await html2pdf().set(opt).from(element).save();
+      } catch (err) {
+        console.error("PDF Export failed:", err);
+      } finally {
+        setIsExporting(false);
+      }
+    }, 100);
   };
 
   const fetchHistory = async () => {
@@ -347,10 +359,11 @@ export default function App() {
                   <div className="flex items-center gap-2" data-html2canvas-ignore="true">
                     <button 
                       onClick={handleExportPDF}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all"
+                      disabled={isExporting}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all ${isExporting ? 'bg-indigo-500/5 text-indigo-500/50 border border-indigo-500/10 cursor-wait' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20'}`}
                     >
-                      <Download size={12} />
-                      Export PDF
+                      <Download size={12} className={isExporting ? "animate-bounce" : ""} />
+                      {isExporting ? 'Exporting...' : 'Export PDF'}
                     </button>
                     <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
                   </div>
