@@ -15,6 +15,7 @@ import {
   Info, ChevronRight, Zap, Copy, Check, Bot, Trash2, ClipboardCheck, Download
 } from 'lucide-react';
 import './index.css';
+import { generatePremiumPDFHtml } from './pdfTemplate';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -113,44 +114,8 @@ export default function App() {
       const ignoreElements = clone.querySelectorAll('[data-html2canvas-ignore="true"]');
       ignoreElements.forEach(el => el.remove());
 
-      // 2. Build the HTML string with essential styles to preserve dark mode formatting
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { 
-              font-family: system-ui, -apple-system, sans-serif; 
-              background-color: #0b0f19; 
-              color: #e2e8f0; 
-              padding: 20px;
-            }
-            .animate-fade-in { animation: none; }
-            h3 { color: white; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
-            .bg-slate-800\\/40 { background-color: rgba(30, 41, 59, 0.4); padding: 10px; border-radius: 8px; }
-            pre { background: #0d1117 !important; padding: 15px; border-radius: 8px; overflow-x: hidden; white-space: pre-wrap; font-size: 11px; }
-            code { color: #c9d1d9; font-family: monospace; }
-            .flex { display: flex; }
-            .grid { display: grid; }
-            .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
-            .gap-2\\.5 { gap: 0.625rem; }
-            .text-center { text-align: center; }
-            .text-sm { font-size: 14px; }
-            .font-black { font-weight: 900; }
-            .text-cyan-400 { color: #22d3ee; }
-            .text-emerald-400 { color: #34d399; }
-            .text-red-400 { color: #f87171; }
-            .text-amber-400 { color: #fbbf24; }
-            /* Hide scrollbars for print */
-            ::-webkit-scrollbar { display: none; }
-          </style>
-        </head>
-        <body>
-          ${clone.innerHTML}
-        </body>
-        </html>
-      `;
+      // 2. Build the HTML string using our premium template generator
+      const htmlContent = generatePremiumPDFHtml(activeItem, metrics, clone.innerHTML);
 
       // 3. Send to backend
       const response = await fetch(`${API_URL}/api/export-pdf`, {
