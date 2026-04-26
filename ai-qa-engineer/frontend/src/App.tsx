@@ -143,7 +143,9 @@ export default function App() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to generate PDF on server');
+        const err = new Error(errorData.error || 'Failed to generate PDF on server') as any;
+        err.details = errorData.details;
+        throw err;
       }
 
       // 4. Download the Blob
@@ -158,7 +160,9 @@ export default function App() {
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error("PDF Export failed:", err);
-      alert("Failed to export PDF: " + err.message);
+      // Attempt to extract details if it was a server error
+      const details = err.details ? `\n\nDetails: ${err.details}` : "";
+      alert("Failed to export PDF: " + err.message + details);
     } finally {
       setIsExporting(false);
     }

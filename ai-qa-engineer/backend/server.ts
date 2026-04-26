@@ -212,7 +212,7 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
 
     let browser;
     try {
-        console.log("Starting PDF generation...");
+        console.log(`Starting PDF generation for HTML of length: ${html.length}`);
         const chromiumAny = chromium as any;
         
         // Launch browser with optimized settings for serverless
@@ -225,20 +225,20 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
 
         const page = await browser.newPage();
         
-        // Use 'load' instead of 'networkidle0' for speed in serverless environments
-        // and set a 30s timeout for the whole operation
+        // Use 'domcontentloaded' for maximum speed in serverless environments
         await page.setContent(html, { 
-            waitUntil: 'load',
-            timeout: 30000 
+            waitUntil: 'domcontentloaded',
+            timeout: 20000 
         });
         
         const pdfBuffer = await page.pdf({
             format: 'A4',
             printBackground: true,
             margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' },
-            timeout: 30000
+            timeout: 20000
         });
         
+        console.log("PDF generation successful.");
         await browser.close();
         browser = null;
 
