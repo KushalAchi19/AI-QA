@@ -19,7 +19,7 @@ app.use(express.json());
 import { analyzeRepository } from './services/repoAnalyzer';
 import { generateTests, analyzeErrorSnippet } from './services/testGenerator';
 import { runGeneratedTest, prepareEnvironment, runPlaywrightTest } from './services/testRunner';
-import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis } from './services/database';
+import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis, getAnalysisById } from './services/database';
 import { fixFailedTest } from './services/agenticFixer';
 
 
@@ -204,10 +204,35 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
+import { generateAnalysisPDF } from './services/pdfService';
+
 app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFunction) => {
-    const { html } = req.body;
+    const { html, id } = req.body;
+    
+    // NEW: If ID is provided, generate PDF from database record (supports any length)
+    if (id) {
+        try {
+            const run = await getAnalysisById(id);
+            if (!run) return res.status(404).json({ error: "Analysis record not found" });
+            
+            const pdfBuffer = await generateAnalysisPDF(run);
+            res.set({
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': 'attachment; filename="AI-Diagnostic-Report.pdf"',
+                'Content-Length': pdfBuffer.length
+            });
+            return res.send(pdfBuffer);
+        } catch (err: any) {
+            console.error("Database-backed PDF generation failed:", err);
+            return res.status(500).json({ 
+                error: "Failed to generate PDF from database.",
+                details: err.message 
+            });
+        }
+    }
+
     if (!html) {
-        return res.status(400).json({ error: 'HTML content is required' });
+        return res.status(400).json({ error: 'HTML content or Analysis ID is required' });
     }
 
     let browser;

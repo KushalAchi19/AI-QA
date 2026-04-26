@@ -131,14 +131,12 @@ export default function App() {
       const ignoreElements = clone.querySelectorAll('[data-html2canvas-ignore="true"]');
       ignoreElements.forEach(el => el.remove());
 
-      // 2. Build the HTML string using our premium template generator
-      const htmlContent = generatePremiumPDFHtml(activeItem, metrics, clone.innerHTML);
-
-      // 3. Send to backend
+      // 2. Send the Analysis ID to the backend for robust, server-side generation
+      // This supports documents of any length and bypasses all payload limits.
       const response = await fetch(`${API_URL}/api/export-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: htmlContent })
+        body: JSON.stringify({ id: activeItem.id })
       });
 
       if (!response.ok) {

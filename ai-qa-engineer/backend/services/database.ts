@@ -89,6 +89,11 @@ export async function getAnalyses(clientId?: string): Promise<AnalysisRecord[]> 
     return results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
+export async function getAnalysisById(id: string): Promise<AnalysisRecord | null> {
+    const db = await readDb();
+    return db.analyses.find((a) => a.id === id) || null;
+}
+
 export async function deleteAnalysis(id: string) {
     const db = await readDb();
     const originalCount = db.analyses.length;
