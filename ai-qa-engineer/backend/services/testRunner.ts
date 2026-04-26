@@ -80,7 +80,7 @@ export async function prepareEnvironment(cloneFolder: string, isHeadless: boolea
 
             if (isNodeApp) {
                 log("Installing CLI dependencies (optimized)...");
-                await execPromise(`npm install --no-fund --no-audit --silent --prefer-offline`, { cwd: sitePath, timeout: 60000 });
+                await execPromise(`npm install --no-fund --no-audit --silent --prefer-offline --no-package-lock --no-save`, { cwd: sitePath, timeout: 60000 });
             }
 
             serverProcess = spawn('node', ['ai-qa-server.js'], { cwd: sitePath, shell: true });
@@ -89,7 +89,7 @@ export async function prepareEnvironment(cloneFolder: string, isHeadless: boolea
         } else if (isNodeApp && hasSrcFolder) {
             log("Modern Web App detected (React/Vue/Vite). Installing dependencies...");
             try {
-                await execPromise(`npm install --no-fund --no-audit --silent --prefer-offline`, { cwd: sitePath, timeout: 120000 });
+                await execPromise(`npm install --no-fund --no-audit --silent --prefer-offline --no-package-lock --no-save`, { cwd: sitePath, timeout: 120000 });
             } catch (e) { log("Notice: npm install timed out or warned, attempting to proceed anyway..."); }
             
             log("Booting Framework Dev Server...");

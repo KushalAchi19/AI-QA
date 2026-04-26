@@ -89,7 +89,8 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                     test_code: code,
                     cicd_code: cicdCode,
                     playwright_output: fullReport,
-                    framework_signature: frameworkSignature
+                    framework_signature: frameworkSignature,
+                    total_duration: (Date.now() - startTime) / 1000
                 });
 
                 // 4. Run the generated test natively (against the already-booted server)

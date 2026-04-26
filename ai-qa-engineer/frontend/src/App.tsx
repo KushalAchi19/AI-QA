@@ -99,8 +99,23 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
-  const metrics = useMemo(() => activeItem ? parseAnalysisMetrics(activeItem) : null, [activeItem]);
+  
+  const metrics = useMemo(() => {
+    if (!activeItem) return null;
+    const m = parseAnalysisMetrics(activeItem);
+    if (m && m.type === 'playwright' && activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED') {
+      const start = new Date(activeItem.created_at).getTime();
+      m.duration = ((now - start) / 1000).toFixed(1);
+    }
+    return m;
+  }, [activeItem, now]);
 
   const handleExportPDF = async () => {
     const element = document.getElementById('report-container');
