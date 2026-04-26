@@ -173,13 +173,13 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
 
     let browser;
     try {
+        const chromiumAny = chromium as any;
         browser = await puppeteer.launch({
-            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
-        });
+            args: [...(chromiumAny.args || []), '--hide-scrollbars', '--disable-web-security'],
+            defaultViewport: chromiumAny.defaultViewport,
+            executablePath: await chromiumAny.executablePath(),
+            headless: chromiumAny.headless === true ? true : 'new',
+        } as any);
         const page = await browser.newPage();
         
         await page.setContent(html, { waitUntil: 'networkidle0' });
