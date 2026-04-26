@@ -70,19 +70,12 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                 // 2. Fetch repo metadata and clone (Shallow)
                 const { files, cloneFolder, isHeadless } = await analyzeRepository(repoUrl, analysisId);
 
-                // 3. THE SPEED RACE: Generate AI tests AND Prepare the Environment at the same time!
-                await updateAnalysis(analysisId, { status: 'GENERATING_TESTS' });
-
-                const [aiResult, envResult] = await Promise.all([
-                    generateTests(repoUrl, files, cloneFolder, isHeadless, framework),
-                    prepareEnvironment(cloneFolder, isHeadless)
-                ]);
-
+                // 3. Run Diagnostic Analysis (AI Part)
+                // This is the blocking part that the user waits for (takes ~10-15s)
+                const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework);
                 const { fileName, code, cicdCode, fullReport, frameworkSignature } = aiResult;
-                const { serverProcess, executionLog, error: envError } = envResult;
 
-                if (envError) throw new Error(envError);
-
+                // 4. Store Intermediate Results (Report becomes visible NOW)
                 await updateAnalysis(analysisId, {
                     status: 'TESTS_GENERATED',
                     test_file: fileName,
@@ -93,39 +86,58 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                     total_duration: (Date.now() - startTime) / 1000
                 });
 
-                // 4. Run the generated test natively (against the already-booted server)
-                if (framework === 'playwright') {
-                    await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
+                // 5. Run Environment Prep & Tests in the background (Non-blocking)
+                (async () => {
+                    let serverProcess;
                     try {
-                        let testResult = await runPlaywrightTest(fileName, executionLog);
+                        const envResult = await prepareEnvironment(cloneFolder, isHeadless);
+                        serverProcess = envResult.serverProcess;
+                        const { executionLog, error: envError } = envResult;
 
-                        // --- AGENTIC LOOP: AUTO-RETRY IF FAILED ---
-                        const hasFailures = testResult.suites?.some((s: any) => s.specs?.some((sp: any) => sp.tests?.some((t: any) => t.results?.some((r: any) => r.status !== 'passed'))));
-                        
-                        if (hasFailures || testResult.error) {
-                            console.log(`Test failed for ${analysisId}. Triggering Agentic Fixer...`);
-                            await updateAnalysis(analysisId, { status: 'ANALYSING' }); // Show fixing status
-                            
-                            const errorSummary = testResult.error || "Test execution failed. See logs for details.";
-                            const fixedCode = await fixFailedTest(repoUrl, code, errorSummary + "\n" + executionLog, framework);
-                            
-                            // Save fixed code and retry
-                            const fixedFileName = `fixed-${Date.now()}.spec.ts`;
-                            const fixedFilePath = require('path').join(__dirname, 'tests-generated', fixedFileName);
-                            require('fs').writeFileSync(fixedFilePath, fixedCode, 'utf8');
-                            
-                            await updateAnalysis(analysisId, { status: 'RUNNING_TESTS', test_code: fixedCode, test_file: fixedFileName });
-                            testResult = await runPlaywrightTest(fixedFileName, executionLog);
+                        if (envError) {
+                            console.error(`Environment setup failed for ${analysisId}: ${envError}`);
+                            return;
                         }
 
-                        // 5. Store Final Results
-                        await updateAnalysis(analysisId, {
-                            status: 'COMPLETED',
-                            playwright_output: fullReport,
-                            total_duration: (Date.now() - startTime) / 1000
-                        });
+                        if (framework === 'playwright') {
+                            await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
+                            let testResult = await runPlaywrightTest(fileName, executionLog);
+
+                            // --- AGENTIC LOOP: AUTO-RETRY IF FAILED ---
+                            const hasFailures = testResult.suites?.some((s: any) => s.specs?.some((sp: any) => sp.tests?.some((t: any) => t.results?.some((r: any) => r.status !== 'passed'))));
+                            
+                            if (hasFailures || testResult.error) {
+                                console.log(`Test failed for ${analysisId}. Triggering Agentic Fixer...`);
+                                await updateAnalysis(analysisId, { status: 'ANALYSING' });
+                                
+                                const errorSummary = testResult.error || "Test execution failed. See logs for details.";
+                                const fixedCode = await fixFailedTest(repoUrl, code, errorSummary + "\n" + executionLog, framework);
+                                
+                                const fixedFileName = `fixed-${Date.now()}.spec.ts`;
+                                const fixedFilePath = require('path').join(__dirname, 'tests-generated', fixedFileName);
+                                require('fs').writeFileSync(fixedFilePath, fixedCode, 'utf8');
+                                
+                                await updateAnalysis(analysisId, { status: 'RUNNING_TESTS', test_code: fixedCode, test_file: fixedFileName });
+                                testResult = await runPlaywrightTest(fixedFileName, executionLog);
+                            }
+
+                            // Store Final Results
+                            await updateAnalysis(analysisId, {
+                                status: 'COMPLETED',
+                                playwright_output: fullReport,
+                                total_duration: (Date.now() - startTime) / 1000
+                            });
+                        } else {
+                            // Non-playwright just completes
+                            await updateAnalysis(analysisId, {
+                                status: 'COMPLETED',
+                                playwright_output: fullReport + "\n\n> **Notice**: Native test execution is optimized for Playwright.",
+                                total_duration: (Date.now() - startTime) / 1000
+                            });
+                        }
+                    } catch (bgError: any) {
+                        console.error(`Background error for ${analysisId}:`, bgError);
                     } finally {
-                        // Cleanup server process
                         if (serverProcess) {
                             if (process.platform === 'win32' && serverProcess.pid) {
                                 require('child_process').exec(`taskkill /pid ${serverProcess.pid} /t /f`);
@@ -134,25 +146,10 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                             }
                         }
                     }
-                } else {
-                    // For non-playwright frameworks, we just complete after generation
-                    await updateAnalysis(analysisId, {
-                        status: 'COMPLETED',
-                        playwright_output: fullReport + "\n\n> **Notice**: Native test execution is currently optimized for Playwright. Your " + framework.charAt(0).toUpperCase() + framework.slice(1) + " suite has been generated above for manual review.",
-                        total_duration: (Date.now() - startTime) / 1000
-                    });
-                    // Still cleanup server process if it was started
-                    if (serverProcess) {
-                        if (process.platform === 'win32' && serverProcess.pid) {
-                            require('child_process').exec(`taskkill /pid ${serverProcess.pid} /t /f`);
-                        } else {
-                            serverProcess.kill('SIGINT');
-                        }
-                    }
-                }
+                })();
 
             } catch (asyncError: any) {
-                console.error(`Async Error during analysis ${analysisId}:`, asyncError);
+                console.error(`Analysis failed for ${analysisId}:`, asyncError);
                 await updateAnalysis(analysisId, {
                     status: 'FAILED',
                     playwright_output: asyncError.message
