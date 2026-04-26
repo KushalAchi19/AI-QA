@@ -26,6 +26,7 @@ interface AnalysisRun {
   status: 'STARTED' | 'GENERATING_TESTS' | 'TESTS_GENERATED' | 'RUNNING_TESTS' | 'COMPLETED' | 'FAILED' | 'ANALYSING';
   test_file?: string;
   test_code?: string;
+  cicd_code?: string;
   playwright_output?: string;
   created_at: string;
 }
@@ -89,6 +90,7 @@ export default function App() {
   };
   const [activeMode, setActiveMode] = useState<'github' | 'snippet'>('snippet');
   const [repoUrl, setRepoUrl] = useState('');
+  const [framework, setFramework] = useState<'playwright' | 'cypress' | 'jest'>('playwright');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
@@ -178,7 +180,7 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId })
+          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework })
         });
         if (!res.ok) throw new Error("Analysis failed to start");
         setRepoUrl('');
@@ -268,6 +270,17 @@ export default function App() {
                     className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium placeholder:text-slate-600"
                   />
                 </div>
+                <div className="relative">
+                  <select
+                    value={framework}
+                    onChange={(e) => setFramework(e.target.value as any)}
+                    className="bg-black/40 border border-white/10 rounded-md py-2 px-3 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium text-slate-300 appearance-none cursor-pointer hover:bg-white/5"
+                  >
+                    <option value="playwright">Playwright</option>
+                    <option value="cypress">Cypress</option>
+                    <option value="jest">Jest</option>
+                  </select>
+                </div>
                 <button
                   type="submit"
                   disabled={loading}
@@ -352,7 +365,7 @@ export default function App() {
                       run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                       'bg-amber-500/10 text-amber-400 border-amber-500/20'
                     }`}>
-                      {run.status === 'COMPLETED' ? 'Success' : run.status === 'FAILED' ? 'Failed' : 'Active'}
+                      {run.status === 'ANALYSING' ? (run.repo_url === 'Code Snippet Debugging' ? 'AI Reasoning...' : 'Autonomous Fix...') : run.status === 'COMPLETED' ? 'Success' : run.status === 'FAILED' ? 'Failed' : 'Active'}
                     </div>
                   </div>
                 );
@@ -514,6 +527,30 @@ export default function App() {
                       <SyntaxHighlighter
                         children={activeItem.test_code}
                         language="javascript"
+                        style={codeTheme as any}
+                        PreTag="div"
+                        customStyle={{ margin: 0, padding: '1.25rem', fontSize: '11px', lineHeight: '1.7' }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeItem.cicd_code && (
+                  <div className="mt-4 border-t border-white/5 pt-6 animate-fade-in">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">CI/CD Pipeline Configuration</h4>
+                      <button
+                        onClick={() => copyToClipboard(activeItem.cicd_code || '', 'cicd')}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-[0.15em] transition-all active:scale-90 ${copiedId === 'cicd' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-400 border border-white/10'}`}
+                      >
+                        {copiedId === 'cicd' ? <ClipboardCheck size={12} /> : <Copy size={12} />}
+                        {copiedId === 'cicd' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <div className="rounded-lg overflow-hidden border border-white/10 shadow-2xl">
+                      <SyntaxHighlighter
+                        children={activeItem.cicd_code}
+                        language="yaml"
                         style={codeTheme as any}
                         PreTag="div"
                         customStyle={{ margin: 0, padding: '1.25rem', fontSize: '11px', lineHeight: '1.7' }}

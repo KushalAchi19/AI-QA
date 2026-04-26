@@ -13,6 +13,7 @@ export interface AnalysisRecord {
     created_at: string;
     test_file?: string;
     test_code?: string;
+    cicd_code?: string;
     playwright_output?: string;
     total_duration?: number;
     framework_signature?: string;

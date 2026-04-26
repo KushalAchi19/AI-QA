@@ -20,6 +20,7 @@ import { analyzeRepository } from './services/repoAnalyzer';
 import { generateTests, analyzeErrorSnippet } from './services/testGenerator';
 import { runGeneratedTest, prepareEnvironment, runPlaywrightTest } from './services/testRunner';
 import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis } from './services/database';
+import { fixFailedTest } from './services/agenticFixer';
 
 
 
@@ -47,7 +48,7 @@ app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction)
 
 // Run a new repository analysis and test generation
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
-    const { repoUrl, clientId } = req.body;
+    const { repoUrl, clientId, framework = 'playwright' } = req.body;
     if (!repoUrl) {
         return res.status(400).json({ error: 'repoUrl is required' });
     }
@@ -73,11 +74,11 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                 await updateAnalysis(analysisId, { status: 'GENERATING_TESTS' });
 
                 const [aiResult, envResult] = await Promise.all([
-                    generateTests(repoUrl, files, cloneFolder, isHeadless),
+                    generateTests(repoUrl, files, cloneFolder, isHeadless, framework),
                     prepareEnvironment(cloneFolder, isHeadless)
                 ]);
 
-                const { fileName, code, fullReport, frameworkSignature } = aiResult;
+                const { fileName, code, cicdCode, fullReport, frameworkSignature } = aiResult;
                 const { serverProcess, executionLog, error: envError } = envResult;
 
                 if (envError) throw new Error(envError);
@@ -86,23 +87,60 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                     status: 'TESTS_GENERATED',
                     test_file: fileName,
                     test_code: code,
+                    cicd_code: cicdCode,
                     playwright_output: fullReport,
                     framework_signature: frameworkSignature
                 });
 
                 // 4. Run the generated test natively (against the already-booted server)
-                await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
-                try {
-                    await runPlaywrightTest(fileName, executionLog);
+                if (framework === 'playwright') {
+                    await updateAnalysis(analysisId, { status: 'RUNNING_TESTS' });
+                    try {
+                        let testResult = await runPlaywrightTest(fileName, executionLog);
 
-                    // 5. Store Final Results
+                        // --- AGENTIC LOOP: AUTO-RETRY IF FAILED ---
+                        const hasFailures = testResult.suites?.some((s: any) => s.specs?.some((sp: any) => sp.tests?.some((t: any) => t.results?.some((r: any) => r.status !== 'passed'))));
+                        
+                        if (hasFailures || testResult.error) {
+                            console.log(`Test failed for ${analysisId}. Triggering Agentic Fixer...`);
+                            await updateAnalysis(analysisId, { status: 'ANALYSING' }); // Show fixing status
+                            
+                            const errorSummary = testResult.error || "Test execution failed. See logs for details.";
+                            const fixedCode = await fixFailedTest(repoUrl, code, errorSummary + "\n" + executionLog, framework);
+                            
+                            // Save fixed code and retry
+                            const fixedFileName = `fixed-${Date.now()}.spec.ts`;
+                            const fixedFilePath = require('path').join(__dirname, 'tests-generated', fixedFileName);
+                            require('fs').writeFileSync(fixedFilePath, fixedCode, 'utf8');
+                            
+                            await updateAnalysis(analysisId, { status: 'RUNNING_TESTS', test_code: fixedCode, test_file: fixedFileName });
+                            testResult = await runPlaywrightTest(fixedFileName, executionLog);
+                        }
+
+                        // 5. Store Final Results
+                        await updateAnalysis(analysisId, {
+                            status: 'COMPLETED',
+                            playwright_output: fullReport,
+                            total_duration: (Date.now() - startTime) / 1000
+                        });
+                    } finally {
+                        // Cleanup server process
+                        if (serverProcess) {
+                            if (process.platform === 'win32' && serverProcess.pid) {
+                                require('child_process').exec(`taskkill /pid ${serverProcess.pid} /t /f`);
+                            } else {
+                                serverProcess.kill('SIGINT');
+                            }
+                        }
+                    }
+                } else {
+                    // For non-playwright frameworks, we just complete after generation
                     await updateAnalysis(analysisId, {
                         status: 'COMPLETED',
-                        playwright_output: fullReport,
+                        playwright_output: fullReport + "\n\n> **Notice**: Native test execution is currently optimized for Playwright. Your " + framework.charAt(0).toUpperCase() + framework.slice(1) + " suite has been generated above for manual review.",
                         total_duration: (Date.now() - startTime) / 1000
                     });
-                } finally {
-                    // Cleanup server process
+                    // Still cleanup server process if it was started
                     if (serverProcess) {
                         if (process.platform === 'win32' && serverProcess.pid) {
                             require('child_process').exec(`taskkill /pid ${serverProcess.pid} /t /f`);

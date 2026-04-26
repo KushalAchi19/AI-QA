@@ -37,9 +37,9 @@ function extractCodeBlock(markdown: string): string {
 }
 
 /**
- * Generates Playwright tests based on code context using Gemini 2.5 Flash
+ * Generates tests based on code context using Gemini 2.5 Flash
  */
-export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean) {
+export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright') {
     const model = getModel();
 
     const filesContext = repoFiles.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n');
@@ -58,7 +58,7 @@ You MUST use these explicit selectors to test their CLI application over the DOM
     }
 
     const prompt = `
-You are a Senior AI QA Engineer and Principal Developer. I need a comprehensive E2E testing brief, code audit, and Playwright test suite for this repository: ${repoUrl}.
+You are a Senior AI QA Engineer and Principal Developer. I need a comprehensive E2E testing brief, code audit, and ${framework} test suite for this repository: ${repoUrl}.
 
 ### ACTUAL REPOSITORY FILES (Perform a deep audit for logic bugs and security flaws!)
 ${filesContext}
@@ -78,12 +78,15 @@ Please provide your response in these exact sections:
 ### ⚙️ 2. TESTING STRATEGY
 [Provide a structured smoke-test plan. Start with a single sentence: "Components/Routes Prioritized for Smoke Test:" then list each key feature or route as a bold subheading (e.g., **Note Addition (Create):**). Under each subheading include exactly two bullet points: "- **Rationale:** [why this is critical to test]" and "- **Scenario:** [concrete step-by-step test scenario]". Close with 1-2 sentences on what broader testing would follow after smoke tests pass.]
 
-### 🚀 3. Playwright Test Suite
-[Provide a complete Playwright test suite in a single markdown code block. 
+### 🚀 3. ${framework.charAt(0).toUpperCase() + framework.slice(1)} Test Suite
+[Provide a complete ${framework} test suite in a single markdown code block. 
 - MUST Use 'http://localhost:3030' as the base URL.
 - DO NOT hallucinate CSS selectors; use only elements found in the ACTUAL REPOSITORY FILES.]
 
-### 💡 4. Best Practices & Roadmap
+### 🔄 4. CI/CD Pipeline Configuration
+[Provide a complete \`.github/workflows/ai-qa.yml\` file in a single markdown code block. This workflow should install dependencies and run the tests you just generated above.]
+
+### 💡 5. Best Practices & Roadmap
 [Suggest 2-3 enterprise-grade QA patterns to improve this repository's long-term quality.]
 `;
 
@@ -96,20 +99,25 @@ Please provide your response in these exact sections:
         const frameworkSection = fullReport.match(/### 🧩 Framework Signature\n+([^\n#]+)/i);
         const frameworkSignature = frameworkSection ? frameworkSection[1].trim() : 'Unknown';
 
-        // Find the "Playwright Test Suite" section specifically to avoid extracting source code by accident
-        const playwrightSection = fullReport.split(/### 🚀 3\. Playwright Test Suite/i)[1] || fullReport;
-        const testCode = extractCodeBlock(playwrightSection);
+        // Find the "Test Suite" section
+        const testSectionMatch = fullReport.match(/### 🚀 3\. (?:Playwright|Cypress|Jest) Test Suite\n+```(?:javascript|typescript|js|ts)?\n([\s\S]*?)```/i);
+        const testCode = testSectionMatch && testSectionMatch[1] ? testSectionMatch[1].trim() : extractCodeBlock(fullReport.split(/### 🚀 3\./i)[1] || fullReport);
+
+        // Find the "CI/CD Pipeline" section
+        const cicdSectionMatch = fullReport.match(/### 🔄 4\. CI\/CD Pipeline Configuration\n+```(?:yaml|yml)?\n([\s\S]*?)```/i);
+        const cicdCode = cicdSectionMatch && cicdSectionMatch[1] ? cicdSectionMatch[1].trim() : '';
 
         const testDir = path.join(__dirname, '..', 'tests-generated');
         if (!fsSync.existsSync(testDir)) {
             await fs.mkdir(testDir, { recursive: true });
         }
 
-        const fileName = `generated-${Date.now()}.spec.ts`;
+        const extension = framework === 'jest' ? 'test.js' : (framework === 'cypress' ? 'cy.js' : 'spec.ts');
+        const fileName = `generated-${Date.now()}.${extension}`;
         const filePath = path.join(testDir, fileName);
         await fs.writeFile(filePath, testCode, 'utf8');
 
-        return { fileName, filePath, code: testCode, fullReport, frameworkSignature };
+        return { fileName, filePath, code: testCode, cicdCode, fullReport, frameworkSignature };
     } catch (error: any) {
         console.error("Error generating test UI:", error);
         throw new Error(`Failed to generate tests via AI: ${error.message}`);
