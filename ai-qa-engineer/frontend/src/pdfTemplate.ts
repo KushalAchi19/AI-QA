@@ -12,10 +12,24 @@ export const generatePremiumPDFHtml = (
   const proseElement = doc.querySelector('.prose-report-classic');
   let proseHtml = proseElement ? proseElement.innerHTML : '';
 
-  // Clean up any stray buttons (like "Copy" buttons in code blocks) that might have survived
+  // Clean up any stray buttons and strip syntax highlighting spans to reduce payload size
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = proseHtml;
   tempDiv.querySelectorAll('button').forEach(b => b.remove());
+  
+  // Remove all spans inside code blocks while preserving their text content
+  // This removes the thousands of highlighter spans that bloat the HTML payload
+  const codeSpans = tempDiv.querySelectorAll('pre span');
+  for (let i = codeSpans.length - 1; i >= 0; i--) {
+    const span = codeSpans[i];
+    const parent = span.parentNode;
+    if (parent) {
+      while (span.firstChild) {
+        parent.insertBefore(span.firstChild, span);
+      }
+      parent.removeChild(span);
+    }
+  }
   
   proseHtml = tempDiv.innerHTML;
 

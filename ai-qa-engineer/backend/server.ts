@@ -211,24 +211,35 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
 
     let browser;
     try {
+        console.log("Starting PDF generation...");
         const chromiumAny = chromium as any;
+        
+        // Launch browser with optimized settings for serverless
         browser = await puppeteer.launch({
-            args: [...(chromiumAny.args || []), '--hide-scrollbars', '--disable-web-security'],
+            args: [...(chromiumAny.args || []), '--hide-scrollbars', '--disable-web-security', '--no-sandbox', '--disable-setuid-sandbox'],
             defaultViewport: chromiumAny.defaultViewport,
             executablePath: await chromiumAny.executablePath(),
             headless: chromiumAny.headless === true ? true : 'new',
         } as any);
+
         const page = await browser.newPage();
         
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        // Use 'load' instead of 'networkidle0' for speed in serverless environments
+        // and set a 30s timeout for the whole operation
+        await page.setContent(html, { 
+            waitUntil: 'load',
+            timeout: 30000 
+        });
         
         const pdfBuffer = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' }
+            margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' },
+            timeout: 30000
         });
         
         await browser.close();
+        browser = null;
 
         res.set({
             'Content-Type': 'application/pdf',
@@ -237,10 +248,13 @@ app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFuncti
         });
         
         res.send(pdfBuffer);
-    } catch (err) {
+    } catch (err: any) {
         console.error("Puppeteer PDF generation failed:", err);
-        if (browser) await browser.close();
-        next(err);
+        if (browser) await (browser as any).close();
+        res.status(500).json({ 
+            error: "Failed to generate PDF on server. This is often due to the report size exceeding serverless execution limits.",
+            details: err.message 
+        });
     }
 });
 
