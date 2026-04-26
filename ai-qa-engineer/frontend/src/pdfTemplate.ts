@@ -17,19 +17,12 @@ export const generatePremiumPDFHtml = (
   tempDiv.innerHTML = proseHtml;
   tempDiv.querySelectorAll('button').forEach(b => b.remove());
   
-  // Remove all spans inside code blocks while preserving their text content
-  // This removes the thousands of highlighter spans that bloat the HTML payload
-  const codeSpans = tempDiv.querySelectorAll('pre span');
-  for (let i = codeSpans.length - 1; i >= 0; i--) {
-    const span = codeSpans[i];
-    const parent = span.parentNode;
-    if (parent) {
-      while (span.firstChild) {
-        parent.insertBefore(span.firstChild, span);
-      }
-      parent.removeChild(span);
-    }
-  }
+  // Remove all nested HTML inside code blocks to ensure perfect readability and zero bloat
+  tempDiv.querySelectorAll('pre').forEach(pre => {
+    // Preserve the raw text content only
+    const rawText = pre.textContent || '';
+    pre.innerHTML = `<code>${rawText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>`;
+  });
   
   proseHtml = tempDiv.innerHTML;
 
@@ -295,41 +288,45 @@ export const generatePremiumPDFHtml = (
 
         /* CODE BLOCKS - PREMIUM DARK THEME */
         .report-content pre, .playwright-block pre {
-          background: #0d1117 !important;
-          color: #c9d1d9 !important;
-          padding: 20px;
-          border-radius: 8px;
+          background: #0f172a !important; /* Slightly lighter/bluer dark */
+          color: #f8fafc !important; /* Near white for maximum contrast */
+          padding: 24px;
+          border-radius: 12px;
           font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          line-height: 1.6;
+          font-size: 10.5px;
+          line-height: 1.7;
           overflow-x: hidden;
           white-space: pre-wrap;
           word-wrap: break-word;
-          border: 1px solid #30363d;
-          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
-          margin: 16px 0 24px 0;
+          border: 1px solid #1e293b;
+          margin: 20px 0 32px 0;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         
-        /* The syntax highlighter wraps code inside divs, strip their bg */
-        .report-content pre div {
+        /* Force all children inside pre to be transparent and readable */
+        .report-content pre *, .playwright-block pre * {
           background: transparent !important;
-          margin: 0 !important;
+          color: inherit !important;
+          border: none !important;
           padding: 0 !important;
+          margin: 0 !important;
         }
 
         .report-content code {
           background: #f1f5f9;
-          color: #be123c;
-          padding: 2px 6px;
+          color: #e11d48; /* rose-600 */
+          padding: 2px 5px;
           border-radius: 4px;
           font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
+          font-size: 10px;
+          font-weight: 500;
         }
         
         pre code {
-          background: transparent;
-          color: inherit;
-          padding: 0;
+          background: transparent !important;
+          color: inherit !important;
+          padding: 0 !important;
+          font-size: inherit !important;
         }
         
         /* Remove the custom UI elements around code blocks from the clone */
