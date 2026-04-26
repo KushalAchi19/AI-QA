@@ -12,9 +12,11 @@ const prismStyle = {
 
 import {
   FileCode, Terminal, History, Globe, AlertCircle, CheckCircle2,
-  Info, ChevronRight, Zap, Copy, Check, Bot, Trash2, ClipboardCheck
+  Info, ChevronRight, Zap, Copy, Check, Bot, Trash2, ClipboardCheck, Download
 } from 'lucide-react';
 import './index.css';
+// @ts-ignore
+import html2pdf from 'html2pdf.js';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -97,6 +99,21 @@ export default function App() {
 
   const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
   const metrics = useMemo(() => activeItem ? parseAnalysisMetrics(activeItem) : null, [activeItem]);
+
+  const handleExportPDF = () => {
+    const element = document.getElementById('report-container');
+    if (!element) return;
+    
+    const opt = {
+      margin:       10,
+      filename:     'AI-Diagnostic-Report.pdf',
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b0f19' },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    
+    html2pdf().set(opt).from(element).save();
+  };
 
   const fetchHistory = async () => {
     try {
@@ -321,13 +338,22 @@ export default function App() {
                 <p className="text-[10px] font-bold mt-2 uppercase">Select a Report</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4 animate-fade-in">
+              <div className="flex flex-col gap-4 animate-fade-in" id="report-container">
                 <header className="flex items-center justify-between border-b border-white/5 pb-2 text-white">
                   <div className="flex items-center gap-2">
                     <Terminal size={14} className="text-cyan-400" />
                     <h3 className="text-sm font-black">AI Diagnostic Report</h3>
                   </div>
-                  <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
+                  <div className="flex items-center gap-2" data-html2canvas-ignore="true">
+                    <button 
+                      onClick={handleExportPDF}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all"
+                    >
+                      <Download size={12} />
+                      Export PDF
+                    </button>
+                    <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
+                  </div>
                 </header>
 
                 {/* Dynamic Metrics Grid */}
