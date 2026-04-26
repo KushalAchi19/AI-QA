@@ -162,6 +162,46 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
     }
 });
 
+import puppeteer from 'puppeteer';
+
+app.post('/api/export-pdf', async (req: Request, res: Response, next: NextFunction) => {
+    const { html } = req.body;
+    if (!html) {
+        return res.status(400).json({ error: 'HTML content is required' });
+    }
+
+    let browser;
+    try {
+        browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' }
+        });
+        
+        await browser.close();
+
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename="AI-Diagnostic-Report.pdf"',
+            'Content-Length': pdfBuffer.length
+        });
+        
+        res.send(pdfBuffer);
+    } catch (err) {
+        console.error("Puppeteer PDF generation failed:", err);
+        if (browser) await browser.close();
+        next(err);
+    }
+});
+
 // Delete an analysis
 app.delete('/api/analyses/:id', async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;

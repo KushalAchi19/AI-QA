@@ -17,6 +17,7 @@
     "dotenv": "latest",
     "express": "latest",
     "playwright": "latest",
+    "puppeteer": "^24.42.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

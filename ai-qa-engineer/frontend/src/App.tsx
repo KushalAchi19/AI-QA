@@ -15,8 +15,6 @@ import {
   Info, ChevronRight, Zap, Copy, Check, Bot, Trash2, ClipboardCheck, Download
 } from 'lucide-react';
 import './index.css';
-// @ts-ignore
-import html2pdf from 'html2pdf.js';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -107,24 +105,78 @@ export default function App() {
     
     setIsExporting(true);
     
-    // Give the UI 100ms to update the button state before blocking the main thread
-    setTimeout(async () => {
-      try {
-        const opt = {
-          margin:       10,
-          filename:     'AI-Diagnostic-Report.pdf',
-          image:        { type: 'jpeg', quality: 0.98 },
-          html2canvas:  { scale: 1.5, useCORS: true, backgroundColor: '#0b0f19', scrollY: 0, logging: false },
-          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-        
-        await html2pdf().set(opt).from(element).save();
-      } catch (err) {
-        console.error("PDF Export failed:", err);
-      } finally {
-        setIsExporting(false);
-      }
-    }, 100);
+    try {
+      // 1. Clone the node to clean it up before sending
+      const clone = element.cloneNode(true) as HTMLElement;
+      
+      // Remove the export button and interactive elements from the clone
+      const ignoreElements = clone.querySelectorAll('[data-html2canvas-ignore="true"]');
+      ignoreElements.forEach(el => el.remove());
+
+      // 2. Build the HTML string with essential styles to preserve dark mode formatting
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { 
+              font-family: system-ui, -apple-system, sans-serif; 
+              background-color: #0b0f19; 
+              color: #e2e8f0; 
+              padding: 20px;
+            }
+            .animate-fade-in { animation: none; }
+            h3 { color: white; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
+            .bg-slate-800\\/40 { background-color: rgba(30, 41, 59, 0.4); padding: 10px; border-radius: 8px; }
+            pre { background: #0d1117 !important; padding: 15px; border-radius: 8px; overflow-x: hidden; white-space: pre-wrap; font-size: 11px; }
+            code { color: #c9d1d9; font-family: monospace; }
+            .flex { display: flex; }
+            .grid { display: grid; }
+            .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+            .gap-2\\.5 { gap: 0.625rem; }
+            .text-center { text-align: center; }
+            .text-sm { font-size: 14px; }
+            .font-black { font-weight: 900; }
+            .text-cyan-400 { color: #22d3ee; }
+            .text-emerald-400 { color: #34d399; }
+            .text-red-400 { color: #f87171; }
+            .text-amber-400 { color: #fbbf24; }
+            /* Hide scrollbars for print */
+            ::-webkit-scrollbar { display: none; }
+          </style>
+        </head>
+        <body>
+          ${clone.innerHTML}
+        </body>
+        </html>
+      `;
+
+      // 3. Send to backend
+      const response = await fetch(`${API_URL}/api/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: htmlContent })
+      });
+
+      if (!response.ok) throw new Error('Failed to generate PDF on server');
+
+      // 4. Download the Blob
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'AI-Diagnostic-Report.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("PDF Export failed:", err);
+      alert("Failed to export PDF: " + (err as Error).message);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const fetchHistory = async () => {
@@ -363,7 +415,7 @@ export default function App() {
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest transition-all ${isExporting ? 'bg-indigo-500/5 text-indigo-500/50 border border-indigo-500/10 cursor-wait' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20'}`}
                     >
                       <Download size={12} className={isExporting ? "animate-bounce" : ""} />
-                      {isExporting ? 'Exporting...' : 'Export PDF'}
+                      {isExporting ? 'Generating PDF...' : 'Export PDF'}
                     </button>
                     <button onClick={() => setActiveItemId(null)}><ChevronRight size={14} /></button>
                   </div>
