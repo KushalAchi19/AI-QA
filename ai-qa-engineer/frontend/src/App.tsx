@@ -315,17 +315,21 @@ export default function App() {
         </nav>
 
         {/* Bottom Engine Status & Upgrade */}
-        <div className="mt-auto px-2 py-3 border-t border-white/5 flex flex-col gap-3">
-          <button 
-            onClick={() => setShowPricing(true)}
-            className="w-full bg-gradient-to-r from-amber-500/20 to-orange-600/20 hover:from-amber-500/30 hover:to-orange-600/30 border border-amber-500/30 rounded-lg p-2.5 flex flex-col gap-1 transition-all group"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Enterprise Plan</span>
-              <Zap size={10} className="text-amber-500 group-hover:scale-125 transition-transform" />
+        <div className="mt-auto px-4 py-6 border-t border-white/5">
+              <button 
+                onClick={() => setShowPricing(true)}
+                className="w-full bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-amber-500/30 p-4 rounded-xl transition-all group text-left relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-40 transition-opacity">
+                  <Zap size={40} className="text-amber-500" />
+                </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Founder Edition</span>
+                  <Zap size={10} className="text-amber-500 fill-amber-500 animate-pulse" />
+                </div>
+                <p className="text-[9px] text-slate-400 font-medium leading-relaxed">Unlock Private Repos & Priority Agentic Loops.</p>
+              </button>
             </div>
-            <p className="text-[8px] text-slate-400 text-left leading-tight">Unlock Private Repos & Priority Agentic Loops.</p>
-          </button>
 
           <div className="flex items-center gap-1.5 opacity-60">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
