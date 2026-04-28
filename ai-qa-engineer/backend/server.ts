@@ -7,6 +7,27 @@ import { Strategy as GitHubStrategy } from 'passport-github2';
 
 dotenv.config();
 
+// --- STARTUP GUARD: Ensure all environment variables are present ---
+const REQUIRED_VARS = [
+    'GEMINI_API_KEY',
+    'SUPABASE_URL',
+    'SUPABASE_KEY',
+    'GITHUB_WORKER_TOKEN',
+    'GITHUB_CLIENT_ID',
+    'GITHUB_CLIENT_SECRET',
+    'FRONTEND_URL',
+    'BACKEND_URL'
+];
+
+REQUIRED_VARS.forEach(varName => {
+    if (!process.env[varName]) {
+        console.error(`❌ CRITICAL ERROR: Missing environment variable ${varName}`);
+        console.error(`Please add ${varName} to your Render Environment settings.`);
+        process.exit(1); // Exit early with a clear error
+    }
+});
+// ------------------------------------------------------------------
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
