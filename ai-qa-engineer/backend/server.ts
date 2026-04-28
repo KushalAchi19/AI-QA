@@ -1,19 +1,91 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import session from 'express-session';
+import passport from 'passport';
+import { Strategy as GitHubStrategy } from 'passport-github2';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Initialize Passport & Session
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'ai-qa-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // Set secure: true in production
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.serializeUser((user: any, done) => done(null, user));
+passport.deserializeUser((obj: any, done) => done(null, obj));
+
+passport.use(new GitHubStrategy({
+    clientID: process.env.GITHUB_CLIENT_ID || '',
+    clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
+    callbackURL: "http://localhost:5000/auth/github/callback",
+    scope: ['user:email', 'repo']
+}, (accessToken: string, refreshToken: string, profile: any, done: any) => {
+    profile.accessToken = accessToken;
+    return done(null, profile);
+}));
+
 app.use(cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: "http://localhost:5173",
     credentials: true
 }));
 
 app.use(express.json());
+
+// Auth Routes
+app.get('/auth/github', passport.authenticate('github', { scope: ['user:email', 'repo'] }));
+
+app.get('/auth/github/callback', 
+    passport.authenticate('github', { failureRedirect: 'http://localhost:5173/login?error=auth_failed' }),
+    (req, res) => {
+        res.redirect('http://localhost:5173?auth=success');
+    }
+);
+
+app.get('/auth/logout', (req, res, next) => {
+    req.logout((err) => {
+        if (err) return next(err);
+        res.redirect('http://localhost:5173');
+    });
+});
+
+app.get('/api/user', (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
+    res.json(req.user);
+});
+
+app.get('/api/user/repos', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
+    
+    const user = req.user as any;
+    try {
+        const response = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100', {
+            headers: {
+                'Authorization': `token ${user.accessToken}`,
+                'User-Agent': 'AI-QA-Engineer-App'
+            }
+        });
+        
+        if (!response.ok) {
+            const errBody = await response.text();
+            console.error(`GitHub API Error: ${errBody}`);
+            throw new Error('Failed to fetch repos from GitHub');
+        }
+        const repos = await response.json();
+        res.json(repos);
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 
 import { analyzeRepository } from './services/repoAnalyzer';

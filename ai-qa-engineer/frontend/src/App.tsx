@@ -98,9 +98,39 @@ export default function App() {
   const [framework, setFramework] = useState<'playwright' | 'cypress' | 'jest'>('playwright');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [errorText, setErrorText] = useState('');
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [repos, setRepos] = useState<any[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string>('');
+  
+  // Check auth state on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/user`, { credentials: 'include' })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        setUser(data);
+        if (data) fetchRepos();
+      });
+  }, []);
+
+  const fetchRepos = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/user/repos`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setRepos(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch repos:", err);
+    }
+  };
+
+  const handleRepoSelect = (url: string) => {
+    setSelectedRepo(url);
+    setRepoUrl(url);
+  };
+
   const [isExporting, setIsExporting] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +254,6 @@ export default function App() {
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorText('');
     setLoading(true);
 
     const clientId = localStorage.getItem('ai-qa-client-id');
@@ -252,7 +281,7 @@ export default function App() {
       }
       setTimeout(fetchHistory, 1000);
     } catch (err: any) {
-      setErrorText(err.message);
+      alert(err.message);
     } finally {
       setLoading(false);
     }
@@ -316,86 +345,105 @@ export default function App() {
               {activeMode === 'github' ? 'Fast, parallelized test generation and code diagnostics.' : 'Analyze snippets for logic bugs and edge cases.'}
             </p>
           </div>
-          {activeMode === 'github' && (
-            <button 
-              onClick={() => setShowTokenInput(!showTokenInput)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.2 rounded-md border text-[10px] font-bold transition-all ${
-                githubToken ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
-              }`}
-            >
-              <Lock size={10} className={githubToken ? 'animate-pulse' : ''} />
-              {githubToken ? 'Authenticated' : 'Secure Access'}
+          <div className="flex items-center gap-4">
+            {user ? (
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-end">
+                  <span className="text-[10px] font-bold text-slate-300">{user.displayName || user.username}</span>
+                  <button 
+                    onClick={() => window.location.href = `${API_URL}/auth/logout`}
+                    className="text-[8px] font-black text-slate-500 uppercase hover:text-rose-400 transition-colors"
+                  >
+                    Logout
+                  </button>
+                </div>
+                <img src={user.photos?.[0]?.value} className="w-8 h-8 rounded-full border border-white/10" alt="avatar" />
+              </div>
+            ) : (
+              <button 
+                onClick={() => window.location.href = `${API_URL}/auth/github`}
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md px-3 py-1.5 transition-all active:scale-95"
+              >
+                <Globe size={14} className="text-slate-400" />
+                <span className="text-[10px] font-bold text-slate-300">Login with GitHub</span>
+              </button>
+            )}
+            <button className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-4 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2">
+              Professional Tier
+              <CheckCircle2 size={12} fill="currentColor" className="text-emerald-950" />
             </button>
-          )}
-        </header>
-
-        {errorText && (
-          <div className="bg-red-500/10 border border-red-500/30 p-2 rounded-lg flex items-center gap-2 text-red-400">
-            <AlertCircle size={13} />
-            <span className="text-[11px] font-medium">{errorText}</span>
           </div>
-        )}
+        </header>
 
         {/* Input Panel */}
         <section className="bg-white/5 rounded-lg p-4 border border-white/10 shadow-xl">
-          {showTokenInput && activeMode === 'github' && (
-            <div className="flex flex-col gap-1.5 p-3 rounded-lg bg-black/40 border border-white/10 mb-4 animate-in fade-in slide-in-from-top-1">
-              <div className="flex justify-between items-center mb-0.5">
-                <label className="text-[9px] uppercase font-black text-slate-500 tracking-widest">GitHub Personal Access Token (PAT)</label>
-                <span className="text-[8px] text-slate-600 font-bold">Stored Locally</span>
-              </div>
-              <input 
-                type="password"
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                className="bg-black/60 border border-white/10 rounded-md px-3 py-2 text-[11px] focus:outline-none focus:border-emerald-500/50 transition-all text-emerald-400 font-mono placeholder:text-slate-800"
-              />
-              <p className="text-[9px] text-slate-500 italic mt-0.5">Required for private repositories. Grants the AI read-access to analyze your proprietary code.</p>
-            </div>
-          )}
           <form onSubmit={handleStart} className="flex flex-col gap-3">
             {activeMode === 'github' ? (
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <input
-                    type="text"
-                    value={repoUrl}
-                    onChange={(e) => setRepoUrl(e.target.value)}
-                    placeholder="GitHub Repository URL..."
-                    className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium placeholder:text-slate-600"
-                  />
-                </div>
-                <div className="relative flex-1">
-                  <Bot className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <input
-                    type="text"
-                    value={focusArea}
-                    onChange={(e) => setFocusArea(e.target.value)}
-                    placeholder="Strategic Focus (e.g. Auth flow, Stripe...)"
-                    className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-emerald-500/50 transition-all font-medium placeholder:text-slate-600"
-                  />
-                </div>
-                <div className="relative">
-                  <select
-                    value={framework}
-                    onChange={(e) => setFramework(e.target.value as any)}
-                    className="bg-black/40 border border-white/10 rounded-md py-2 px-3 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium text-slate-300 appearance-none cursor-pointer hover:bg-white/5"
+              <div className="flex flex-col gap-3">
+                {user && repos.length > 0 && (
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                      <FileCode size={14} className="text-slate-500" />
+                    </div>
+                    <select
+                      value={selectedRepo}
+                      onChange={(e) => handleRepoSelect(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-md py-2.5 pl-9 pr-4 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium text-slate-200 appearance-none cursor-pointer hover:bg-white/5"
+                    >
+                      <option value="">Select from your repositories...</option>
+                      {repos.map(r => (
+                        <option key={r.id} value={r.html_url}>
+                          {r.private ? '🔒' : '🌐'} {r.full_name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                      <ChevronRight size={14} className="text-slate-600 rotate-90" />
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                    <input
+                      type="text"
+                      value={repoUrl}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                      placeholder="Or paste any public GitHub URL..."
+                      className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium placeholder:text-slate-600"
+                    />
+                  </div>
+                  <div className="relative flex-1">
+                    <Bot className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                    <input
+                      type="text"
+                      value={focusArea}
+                      onChange={(e) => setFocusArea(e.target.value)}
+                      placeholder="Strategic Focus (e.g. Auth flow, Stripe...)"
+                      className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-emerald-500/50 transition-all font-medium placeholder:text-slate-600"
+                    />
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={framework}
+                      onChange={(e) => setFramework(e.target.value as any)}
+                      className="bg-black/40 border border-white/10 rounded-md py-2 px-3 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium text-slate-300 appearance-none cursor-pointer hover:bg-white/5"
+                    >
+                      <option value="playwright">Playwright</option>
+                      <option value="cypress">Cypress</option>
+                      <option value="jest">Jest</option>
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-black text-[10px] uppercase tracking-widest px-6 rounded-md transition-all shadow-lg active:scale-95 flex items-center gap-2"
                   >
-                    <option value="playwright">Playwright</option>
-                    <option value="cypress">Cypress</option>
-                    <option value="jest">Jest</option>
-                  </select>
+                    {loading ? 'Analyzing...' : 'Run Engine'}
+                    <Zap size={12} fill="white" />
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-black text-[10px] uppercase tracking-widest px-6 rounded-md transition-all shadow-lg active:scale-95 flex items-center gap-2"
-                >
-                  {loading ? 'Analyzing...' : 'Run Engine'}
-                  <Zap size={12} fill="white" />
-                </button>
               </div>
             ) : (
               <div className="flex flex-col gap-3 relative">
