@@ -330,12 +330,10 @@ export default function App() {
                 <p className="text-[9px] text-slate-400 font-medium leading-relaxed">Unlock Private Repos & Priority Agentic Loops.</p>
               </button>
             </div>
-
-          <div className="flex items-center gap-1.5 opacity-60">
+          <div className="flex items-center gap-1.5 opacity-60 mt-3">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest">Gemini 2.5 Flash</span>
           </div>
-        </div>
       </aside>
 
       {/* Main Content */}
