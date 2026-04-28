@@ -39,10 +39,16 @@ function extractCodeBlock(markdown: string): string {
 /**
  * Generates tests based on code context using Gemini 2.5 Flash
  */
-export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright') {
+export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright', focusArea: string = '') {
     const model = getModel();
 
     const filesContext = repoFiles.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n');
+
+    const focusPrompt = focusArea ? `
+### 🎯 STRATEGIC FOCUS: ${focusArea}
+The user has requested a prioritized analysis and testing for the area described above. 
+You MUST give extra attention to files, logic, and edge cases related to this specific intent.
+` : '';
 
     let headlessPrompt = '';
     if (isHeadless) {
@@ -58,36 +64,35 @@ You MUST use these explicit selectors to test their CLI application over the DOM
     }
 
     const prompt = `
-You are a Senior AI QA Engineer and Principal Developer. I need a comprehensive E2E testing brief, code audit, and ${framework} test suite for this repository: ${repoUrl}.
-
-### ACTUAL REPOSITORY FILES (Perform a deep audit for logic bugs and security flaws!)
-${filesContext}
+You are a Senior AI QA Engineer. Analyze this repository: ${repoUrl}.
+${focusPrompt}
 ${headlessPrompt}
 
-Please provide your response in these exact sections:
+### REPOSITORY CONTEXT
+${filesContext}
+
+### RESPONSE REQUIREMENTS (BE CONCISE, HIGH DENSITY)
 
 ### 🧩 Framework Signature
-[Provide a short 2-3 word identifier of the primary tech stack, e.g., 'React / Vite', 'Java / Maven', 'Node / Express'.]
+[2-3 words tech stack]
 
 ### 🛠️ Corrected Solution
-[If you find logic bugs, provide the FULLY FIXED source code for the primary file here. If no bugs, suggest 1 major performance enhancement with code.]
+[Provide FULLY FIXED code for the most critical file only if bugs exist. Otherwise, provide 1 high-impact performance fix.]
 
 ### 📋 1. EXECUTIVE SUMMARY
-[Write 2-3 professional prose paragraphs summarizing: what this application does, its overall architecture (frontend framework, data layer, key patterns), and a high-level quality assessment — strengths, risks, and notable characteristics. Do NOT use bullet points here; write in clear, authoritative engineering prose.]
+[2 paragraphs of technical prose. Architecture, patterns, and quality assessment.]
 
 ### ⚙️ 2. TESTING STRATEGY
-[Provide a structured smoke-test plan. Start with a single sentence: "Components/Routes Prioritized for Smoke Test:" then list each key feature or route as a bold subheading (e.g., **Note Addition (Create):**). Under each subheading include exactly two bullet points: "- **Rationale:** [why this is critical to test]" and "- **Scenario:** [concrete step-by-step test scenario]". Close with 1-2 sentences on what broader testing would follow after smoke tests pass.]
+[Bullet points for key features. Each must have: **Feature Name**, **Rationale**, and **Scenario**.]
 
 ### 🚀 3. ${framework.charAt(0).toUpperCase() + framework.slice(1)} Test Suite
-[Provide a complete ${framework} test suite in a single markdown code block. 
-- MUST Use 'http://localhost:3030' as the base URL.
-- DO NOT hallucinate CSS selectors; use only elements found in the ACTUAL REPOSITORY FILES.]
+[Complete E2E test suite in one block. Use http://localhost:3030. No hallucinated selectors.]
 
 ### 🔄 4. CI/CD Pipeline Configuration
-[Provide a complete \`.github/workflows/ai-qa.yml\` file in a single markdown code block. This workflow should install dependencies and run the tests you just generated above.]
+[One block for .github/workflows/ai-qa.yml]
 
 ### 💡 5. Best Practices & Roadmap
-[Suggest 2-3 enterprise-grade QA patterns to improve this repository's long-term quality.]
+[3 bullet points for long-term quality improvement.]
 `;
 
     try {

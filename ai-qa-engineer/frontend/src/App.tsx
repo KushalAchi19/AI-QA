@@ -11,11 +11,13 @@ const prismStyle = {
 };
 
 import {
-  FileCode, Terminal, History, Globe, AlertCircle, CheckCircle2,
-  Info, ChevronRight, Zap, Copy, Check, Bot, Trash2, ClipboardCheck, Download
+  FileCode, Terminal, Globe, AlertCircle, CheckCircle2,
+  ChevronRight, Zap, Copy, Bot, Trash2, ClipboardCheck, Download, Lock, Check
 } from 'lucide-react';
 import './index.css';
 import { generatePremiumPDFHtml } from './pdfTemplate';
+import { generateClientPDF } from './pdfService';
+import ErrorBoundary from './ErrorBoundary';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -29,6 +31,8 @@ interface AnalysisRun {
   cicd_code?: string;
   playwright_output?: string;
   created_at: string;
+  total_duration?: number;
+  framework_signature?: string;
 }
 
 // --- LOGIC UTILITIES ---
@@ -90,6 +94,7 @@ export default function App() {
   };
   const [activeMode, setActiveMode] = useState<'github' | 'snippet'>('snippet');
   const [repoUrl, setRepoUrl] = useState('');
+  const [focusArea, setFocusArea] = useState('');
   const [framework, setFramework] = useState<'playwright' | 'cypress' | 'jest'>('playwright');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,6 +102,7 @@ export default function App() {
   const [runs, setRuns] = useState<AnalysisRun[]>([]);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
@@ -132,43 +138,11 @@ export default function App() {
     setIsExporting(true);
     
     try {
-      // 1. Clone the node to clean it up before sending
-      const clone = element.cloneNode(true) as HTMLElement;
-      
-      // Remove the export button and interactive elements from the clone
-      const ignoreElements = clone.querySelectorAll('[data-html2canvas-ignore="true"]');
-      ignoreElements.forEach(el => el.remove());
-
-      // 2. Send the Analysis ID to the backend for robust, server-side generation
-      // This supports documents of any length and bypasses all payload limits.
-      const response = await fetch(`${API_URL}/api/export-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: activeItem.id })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const err = new Error(errorData.error || 'Failed to generate PDF on server') as any;
-        err.details = errorData.details;
-        throw err;
-      }
-
-      // 4. Download the Blob
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'AI-Diagnostic-Report.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      console.error("PDF Export failed:", err);
-      // Attempt to extract details if it was a server error
-      const details = err.details ? `\n\nDetails: ${err.details}` : "";
-      alert("Failed to export PDF: " + err.message + details);
+      setIsExporting(true);
+      await generateClientPDF(activeItem);
+    } catch (err) {
+      console.error("Client-side PDF generation failed:", err);
+      alert("Failed to generate PDF. Please try again.");
     } finally {
       setIsExporting(false);
     }
@@ -238,9 +212,15 @@ export default function App() {
     if (localVaultRaw) setRuns(JSON.parse(localVaultRaw));
 
     fetchHistory();
-    const interval = setInterval(fetchHistory, 5000);
+    
+    // DYNAMIC POLLING: High frequency (1s) during active runs, low frequency (5s) otherwise.
+    let intervalTime = 5000;
+    const activeRun = runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED');
+    if (activeRun) intervalTime = 1000;
+
+    const interval = setInterval(fetchHistory, intervalTime);
     return () => clearInterval(interval);
-  }, []);
+  }, [runs.length, runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED')]);
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -254,10 +234,11 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework, githubToken })
+          body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework, githubToken, focusArea })
         });
         if (!res.ok) throw new Error("Analysis failed to start");
         setRepoUrl('');
+        setFocusArea('');
       } else {
         if (!selectedFile) return;
         const code = await selectedFile.text();
@@ -304,8 +285,19 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Bottom Engine Status */}
-        <div className="mt-auto px-2 py-2 border-t border-white/5 flex flex-col gap-2">
+        {/* Bottom Engine Status & Upgrade */}
+        <div className="mt-auto px-2 py-3 border-t border-white/5 flex flex-col gap-3">
+          <button 
+            onClick={() => setShowPricing(true)}
+            className="w-full bg-gradient-to-r from-amber-500/20 to-orange-600/20 hover:from-amber-500/30 hover:to-orange-600/30 border border-amber-500/30 rounded-lg p-2.5 flex flex-col gap-1 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Enterprise Plan</span>
+              <Zap size={10} className="text-amber-500 group-hover:scale-125 transition-transform" />
+            </div>
+            <p className="text-[8px] text-slate-400 text-left leading-tight">Unlock Private Repos & Priority Agentic Loops.</p>
+          </button>
+
           <div className="flex items-center gap-1.5 opacity-60">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest">Gemini 2.5 Flash</span>
@@ -373,6 +365,16 @@ export default function App() {
                     onChange={(e) => setRepoUrl(e.target.value)}
                     placeholder="GitHub Repository URL..."
                     className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-cyan-500/50 transition-all font-medium placeholder:text-slate-600"
+                  />
+                </div>
+                <div className="relative flex-1">
+                  <Bot className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                  <input
+                    type="text"
+                    value={focusArea}
+                    onChange={(e) => setFocusArea(e.target.value)}
+                    placeholder="Strategic Focus (e.g. Auth flow, Stripe...)"
+                    className="w-full bg-black/40 border border-white/10 rounded-md py-2 pl-9 pr-4 text-[11px] focus:outline-none focus:border-emerald-500/50 transition-all font-medium placeholder:text-slate-600"
                   />
                 </div>
                 <div className="relative">
@@ -444,55 +446,80 @@ export default function App() {
 
         {/* Board View */}
         <section className="flex flex-col lg:flex-row gap-2.5 flex-1 min-h-0">
-          {/* List Sidebar */}
-          <div className="w-[180px] flex flex-col gap-1.5 overflow-y-auto pr-0.5 custom-scrollbar">
-            <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 px-1">Audit History</h3>
-            {runs
-              .filter(run => {
+          {/* List Sidebar: Project-Based Workspaces */}
+          <div className="w-[180px] flex flex-col gap-3 overflow-y-auto pr-0.5 custom-scrollbar">
+            <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1">Projects / Workspaces</h3>
+            
+            {(() => {
+              const filteredRuns = runs.filter(run => {
                 const isSnippet = run.repo_url === 'Code Snippet Debugging';
                 return activeMode === 'snippet' ? isSnippet : !isSnippet;
-              })
-              .map(run => {
-                const fileName = run.repo_url === 'Code Snippet Debugging' ? 'Snippet' : (run.repo_url?.split('/').pop() || 'Analysis Run');
+              });
+
+              // Group runs by repository URL
+              const groups: { [key: string]: AnalysisRun[] } = {};
+              filteredRuns.forEach(run => {
+                const repo = run.repo_url;
+                if (!groups[repo]) groups[repo] = [];
+                groups[repo].push(run);
+              });
+
+              return Object.entries(groups).map(([repoUrl, repoRuns]) => {
+                const repoName = repoUrl === 'Code Snippet Debugging' ? 'Snippets' : (repoUrl.split('/').pop()?.replace('.git', '') || 'Project');
+                
                 return (
-                  <div
-                    key={run.id} onClick={() => setActiveItemId(run.id)}
-                    className={`cursor-pointer rounded-md p-2 border flex flex-col gap-1 transition-all ${activeItemId === run.id ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <span className="text-[10px] text-white font-bold truncate max-w-[80%]">
-                        {fileName}
-                      </span>
-                      <button onClick={(e) => { 
-                        e.stopPropagation(); 
-                        fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
-                          // Also remove from local vault
-                          const vaultRaw = localStorage.getItem('ai-qa-local-vault');
-                          if (vaultRaw) {
-                            const vault = JSON.parse(vaultRaw);
-                            const newVault = vault.filter((v: any) => v.id !== run.id);
-                            localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
-                          }
-                          fetchHistory();
-                        }); 
-                      }} className="text-slate-400 hover:text-red-400 transition-colors"><Trash2 size={9} /></button>
+                  <div key={repoUrl} className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2 px-1 mb-0.5">
+                      <div className="w-1 h-1 rounded-full bg-cyan-500/50" />
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter truncate">{repoName}</span>
                     </div>
-                    <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
-                      (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                      run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                      'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                    }`}>
-                      {run.status === 'ANALYSING' ? (run.repo_url === 'Code Snippet Debugging' ? 'AI Reasoning...' : 'Autonomous Fix...') : 
-                       (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'Success' : 
-                       run.status === 'FAILED' ? 'Failed' : 'Active'}
-                    </div>
+                    
+                    {repoRuns.map(run => (
+                      <div
+                        key={run.id} onClick={() => setActiveItemId(run.id)}
+                        className={`cursor-pointer rounded-md p-2 border flex flex-col gap-1 transition-all group/item ${activeItemId === run.id ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className="text-[9px] text-white font-bold truncate max-w-[80%]">
+                            {new Date(run.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
+                              const vaultRaw = localStorage.getItem('ai-qa-local-vault');
+                              if (vaultRaw) {
+                                const vault = JSON.parse(vaultRaw);
+                                const newVault = vault.filter((v: any) => v.id !== run.id);
+                                localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
+                              }
+                              fetchHistory();
+                            }); 
+                          }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all"><Trash2 size={8} /></button>
+                        </div>
+                        <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
+                          (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                          run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                          'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-pulse'
+                        }`}>
+                          {run.status.replace('_', ' ')}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 );
-              })}
+              });
+            })()}
           </div>
 
           {/* Detailed Report */}
-          <div className="flex-1 glass-panel border border-white/10 rounded-lg p-4 overflow-y-auto">
+          <div className="flex-1 glass-panel border border-white/10 rounded-lg p-4 overflow-y-auto relative">
+            <ErrorBoundary fallback={
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
+                <AlertCircle size={32} className="text-amber-500" />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Diagnostic Report Corrupted</p>
+                <button onClick={() => window.location.reload()} className="text-[9px] bg-white/5 px-3 py-1 rounded hover:bg-white/10 transition-all border border-white/10">Try Recovery</button>
+              </div>
+            }>
             {!activeItem ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-40">
                 <Terminal size={32} />
@@ -679,8 +706,64 @@ export default function App() {
                 )}
               </div>
             )}
+            </ErrorBoundary>
           </div>
         </section>
+
+        {/* Pricing Modal */}
+        {showPricing && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="max-w-2xl w-full bg-[#0c111d] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row animate-in zoom-in-95 duration-300">
+              <div className="flex-1 p-8 border-r border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent">
+                <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center mb-6">
+                  <Bot size={20} className="text-indigo-400" />
+                </div>
+                <h3 className="text-2xl font-black text-white mb-2 tracking-tight">Scale Quality Assurance</h3>
+                <p className="text-slate-400 text-sm mb-6 leading-relaxed">The AI QA Agent is free for individual snippets. Upgrade to unlock full repository diagnostics and CI/CD automation.</p>
+                
+                <ul className="space-y-3">
+                  {[
+                    'Autonomous Playwright Test Generation',
+                    'Strategic Focus (Surgical Audits)',
+                    'Agentic Self-Healing Loop',
+                    'CI/CD Pipeline (.github/workflows) Export',
+                    'Private Repository Analysis (Secure PAT)'
+                  ].map((feature, i) => (
+                    <li key={i} className="flex items-center gap-3 text-slate-300 text-[11px] font-medium">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                        <Check size={10} className="text-emerald-500" />
+                      </div>
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="w-[280px] bg-white/[0.01] p-8 flex flex-col justify-center gap-6">
+                <div className="text-center">
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Professional Tier</span>
+                  <div className="flex items-baseline justify-center gap-1">
+                    <span className="text-4xl font-black text-white">$49</span>
+                    <span className="text-slate-500 text-sm">/mo</span>
+                  </div>
+                </div>
+                
+                <button className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-3 rounded-xl transition-all active:scale-95 shadow-lg shadow-indigo-500/20 text-xs uppercase tracking-widest">
+                  Start 14-Day Trial
+                </button>
+                
+                <p className="text-[9px] text-slate-600 text-center font-medium italic">Secure checkout via Stripe. No credit card required to start.</p>
+                
+                <button 
+                  onClick={() => setShowPricing(false)}
+                  className="mt-4 text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-white transition-all"
+                >
+                  Maybe Later
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

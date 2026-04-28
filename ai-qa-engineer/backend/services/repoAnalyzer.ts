@@ -65,26 +65,30 @@ export async function analyzeRepository(repoUrl: string, analysisId: string, git
 async function fetchKeyFilesViaAPI(owner: string, repo: string, githubToken?: string): Promise<any[]> {
     const criticalPaths = ['package.json', 'src', 'app', 'public', 'index.html', 'main.js', 'app.js', 'server.js'];
     const files: any[] = [];
+    const seenPaths = new Set<string>();
     
     async function fetchPath(path: string, depth = 0) {
-        if (depth > 2 || files.length > 25) return;
+        if (depth > 2 || files.length > 25 || seenPaths.has(path)) return;
+        seenPaths.add(path);
+        
         const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
         
         try {
             const headers: any = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AI-QA-Engineer' };
             if (githubToken) headers['Authorization'] = `token ${githubToken}`;
             
-            const res = await axios.get(url, { headers });
+            const res = await axios.get(url, { headers, timeout: 5000 });
             const data = res.data;
             
             if (Array.isArray(data)) {
-                for (const item of data) {
+                // Parallelize child directory scanning
+                await Promise.all(data.map(async (item: any) => {
                     if (item.type === 'file' && isSemanticFile(item.name)) {
                         await fetchPath(item.path, depth + 1);
-                    } else if (item.type === 'dir' && (item.name === 'src' || item.name === 'app' || item.name === 'components')) {
+                    } else if (item.type === 'dir' && (item.name === 'src' || item.name === 'app' || item.name === 'components' || item.name === 'lib')) {
                         await fetchPath(item.path, depth + 1);
                     }
-                }
+                }));
             } else if (data.type === 'file' && data.content) {
                 const content = Buffer.from(data.content, 'base64').toString('utf8');
                 if (content.length < 50000) {
@@ -96,6 +100,7 @@ async function fetchKeyFilesViaAPI(owner: string, repo: string, githubToken?: st
         }
     }
 
+    // Launch initial critical path fetches in parallel
     await Promise.all(criticalPaths.map(p => fetchPath(p)));
     return files;
 }

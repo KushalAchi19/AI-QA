@@ -1,0 +1,51 @@
+name: AI QA Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      analysisId:
+        description: 'The ID of the analysis record in Supabase'
+        required: true
+      repoUrl:
+        description: 'The GitHub Repository to analyze'
+        required: true
+      framework:
+        description: 'Test framework (playwright, cypress, jest)'
+        default: 'playwright'
+      focusArea:
+        description: 'Strategic focus for the analysis'
+        default: ''
+      githubToken:
+        description: 'PAT for private repo access'
+        default: ''
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout AI QA Engine
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/checkout@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: |
+          cd backend
+          npm install
+
+      - name: Run Worker Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ANALYSIS_ID: ${{ github.event.inputs.analysisId }}
+          REPO_URL: ${{ github.event.inputs.repoUrl }}
+          FRAMEWORK: ${{ github.event.inputs.framework }}
+          FOCUS_AREA: ${{ github.event.inputs.focusArea }}
+          TARGET_GITHUB_TOKEN: ${{ github.event.inputs.githubToken }}
+        run: |
+          cd backend
+          npx ts-node services/worker-entry.ts
