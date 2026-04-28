@@ -368,9 +368,9 @@ export default function App() {
                 <span className="text-[10px] font-bold text-slate-300">Login with GitHub</span>
               </button>
             )}
-            <button className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-4 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2">
-              Professional Tier
-              <CheckCircle2 size={12} fill="currentColor" className="text-emerald-950" />
+            <button className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 px-4 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2">
+              Founder Edition
+              <CheckCircle2 size={12} fill="currentColor" className="text-amber-950" />
             </button>
           </div>
         </header>
@@ -789,7 +789,7 @@ export default function App() {
 
               <div className="w-[280px] bg-white/[0.01] p-8 flex flex-col justify-center gap-6">
                 <div className="text-center">
-                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block">Professional Tier</span>
+                  <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-2 block">Founder Edition</span>
                   <div className="flex items-baseline justify-center gap-1">
                     <span className="text-4xl font-black text-white">$49</span>
                     <span className="text-slate-500 text-sm">/mo</span>
