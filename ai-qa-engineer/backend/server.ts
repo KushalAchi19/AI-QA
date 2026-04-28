@@ -27,7 +27,7 @@ passport.deserializeUser((obj: any, done) => done(null, obj));
 passport.use(new GitHubStrategy({
     clientID: process.env.GITHUB_CLIENT_ID || '',
     clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
-    callbackURL: "http://localhost:5000/auth/github/callback",
+    callbackURL: `${process.env.BACKEND_URL}/auth/github/callback`,
     scope: ['user:email', 'repo']
 }, (accessToken: string, refreshToken: string, profile: any, done: any) => {
     profile.accessToken = accessToken;
@@ -35,7 +35,7 @@ passport.use(new GitHubStrategy({
 }));
 
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: process.env.FRONTEND_URL,
     credentials: true
 }));
 
@@ -45,16 +45,16 @@ app.use(express.json());
 app.get('/auth/github', passport.authenticate('github', { scope: ['user:email', 'repo'] }));
 
 app.get('/auth/github/callback', 
-    passport.authenticate('github', { failureRedirect: 'http://localhost:5173/login?error=auth_failed' }),
+    passport.authenticate('github', { failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed` }),
     (req, res) => {
-        res.redirect('http://localhost:5173?auth=success');
+        res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
     }
 );
 
 app.get('/auth/logout', (req, res, next) => {
     req.logout((err) => {
         if (err) return next(err);
-        res.redirect('http://localhost:5173');
+        res.redirect(`${process.env.FRONTEND_URL}`);
     });
 });
 
