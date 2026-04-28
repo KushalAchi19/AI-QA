@@ -22,8 +22,9 @@ const REQUIRED_VARS = [
 REQUIRED_VARS.forEach(varName => {
     if (!process.env[varName]) {
         console.error(`❌ CRITICAL ERROR: Missing environment variable ${varName}`);
+        console.log('Available keys:', Object.keys(process.env).filter(k => !k.startsWith('npm_'))); // Log what we DO see
         console.error(`Please add ${varName} to your Render Environment settings.`);
-        process.exit(1); // Exit early with a clear error
+        process.exit(1); 
     }
 });
 // ------------------------------------------------------------------
