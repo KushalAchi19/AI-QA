@@ -4,14 +4,17 @@
   "description": "Backend for AI QA Engineer using Express, Playwright, and Google Generative AI",
   "main": "server.ts",
   "scripts": {
-    "start": "ts-node server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "test:generated": "playwright test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@google/genai": "latest",
     "@google/generative-ai": "^0.24.1",
-    "@playwright/test": "latest",
     "@supabase/supabase-js": "^2.105.1",
     "@types/express-session": "^1.19.0",
     "@types/marked": "^5.0.2",
@@ -24,14 +27,15 @@
     "express-session": "^1.19.0",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
-    "playwright": "latest",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "latest",
     "@types/cors": "latest",
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/uuid": "^10.0.0",
+    "playwright": "latest",
     "ts-node": "latest",
     "ts-node-dev": "latest",
     "typescript": "latest"
