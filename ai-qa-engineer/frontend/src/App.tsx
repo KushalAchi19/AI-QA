@@ -315,25 +315,26 @@ export default function App() {
         </nav>
 
         {/* Bottom Engine Status & Upgrade */}
-        <div className="mt-auto px-4 py-6 border-t border-white/5">
-              <button 
-                onClick={() => setShowPricing(true)}
-                className="w-full bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-amber-500/30 p-4 rounded-xl transition-all group text-left relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 p-2 opacity-20 group-hover:opacity-40 transition-opacity">
-                  <Zap size={40} className="text-amber-500" />
-                </div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Founder Edition</span>
-                  <Zap size={10} className="text-amber-500 fill-amber-500 animate-pulse" />
-                </div>
-                <p className="text-[9px] text-slate-400 font-medium leading-relaxed">Unlock Private Repos & Priority Agentic Loops.</p>
-              </button>
+        <div className="mt-auto pt-4 border-t border-white/5 space-y-4">
+          <button 
+            onClick={() => setShowPricing(true)}
+            className="w-full bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 border border-amber-500/30 p-3 rounded-xl transition-all group text-left relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+              <Zap size={32} className="text-amber-500" />
             </div>
-          <div className="flex items-center gap-1.5 opacity-60 mt-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Founder Edition</span>
+              <Zap size={8} className="text-amber-500 fill-amber-500 animate-pulse" />
+            </div>
+            <p className="text-[8px] text-slate-400 font-medium leading-tight">Unlock Private Repos & Priority Agentic Loops.</p>
+          </button>
+
+          <div className="flex items-center gap-1.5 opacity-60 px-1 pb-2">
             <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest">Gemini 2.5 Flash</span>
           </div>
+        </div>
       </aside>
 
       {/* Main Content */}
