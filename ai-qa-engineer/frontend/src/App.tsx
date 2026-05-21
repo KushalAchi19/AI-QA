@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-// Use a more stable style import or a local style object
+
 const prismStyle = {
   'code[class*="language-"]': { color: '#e0e0e0' },
   'pre[class*="language-"]': { background: '#0a0c10' },
@@ -12,10 +12,9 @@ const prismStyle = {
 
 import {
   FileCode, Terminal, Globe, AlertCircle, CheckCircle2,
-  ChevronRight, Zap, Copy, Bot, Trash2, ClipboardCheck, Download, Lock, Check
+  ChevronRight, Zap, Copy, Bot, Trash2, ClipboardCheck, Download, Check
 } from 'lucide-react';
 import './index.css';
-import { generatePremiumPDFHtml } from './pdfTemplate';
 import { generateClientPDF } from './pdfService';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -36,10 +35,50 @@ interface AnalysisRun {
 }
 
 // --- LOGIC UTILITIES ---
-const extractCodeSnippet = (markdown: string) => {
-  const regex = /### 1\. Corrected Solution\n+```[a-z]*\n([\s\S]*?)```/i;
-  const match = markdown.match(regex);
-  return match ? match[1].trim() : null;
+const getClientId = (): string => {
+  let id = localStorage.getItem('ai-qa-client-id');
+  if (!id) {
+    id = `cli-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`;
+    localStorage.setItem('ai-qa-client-id', id);
+  }
+  return id;
+};
+
+const getReportTitle = (run: AnalysisRun): string => {
+  // 1. If we have a file name/test file name saved in the database
+  if (run.test_file && run.test_file !== 'Code Snippet Debugging') {
+    return run.test_file.split('/').pop() || run.test_file;
+  }
+  
+  // 2. If it's a code snippet, try to extract error type or main title from output
+  if (run.repo_url === 'Code Snippet Debugging') {
+    if (run.playwright_output) {
+      const errorTypeMatch = run.playwright_output.match(/\*\*Error Type\*\*:\s*(.+)/i);
+      if (errorTypeMatch && errorTypeMatch[1]) {
+        return errorTypeMatch[1].trim().replace(/\*|_|#/g, '');
+      }
+
+      const headerMatch = run.playwright_output.match(/###\s*(.+)/);
+      if (headerMatch && headerMatch[1]) {
+        return headerMatch[1].trim().replace(/[📋📋🔍💡🖥️✅⚙️*]/g, '').trim();
+      }
+    }
+    return 'Code Snippet Audit';
+  }
+
+  // 3. For repository audits, try to use repo name
+  if (run.repo_url) {
+    const parts = run.repo_url.replace(/\.git$/, '').split('/');
+    const lastPart = parts[parts.length - 1];
+    if (lastPart && lastPart !== 'Code Snippet Debugging') {
+      const formattedName = lastPart.charAt(0).toUpperCase() + lastPart.slice(1);
+      return run.framework_signature 
+        ? `${formattedName} (${run.framework_signature})`
+        : `${formattedName} Audit`;
+    }
+  }
+
+  return 'Smart Diagnosis';
 };
 
 const parseAnalysisMetrics = (run: AnalysisRun) => {
@@ -55,7 +94,6 @@ const parseAnalysisMetrics = (run: AnalysisRun) => {
         const failed = stats.unexpected || 0;
         const skipped = (stats.skipped || 0) + (stats.flaky || 0);
         const total = passed + failed + skipped;
-        const score = total > 0 ? Math.round((passed / total) * 100) : 0;
         return {
           type: 'playwright',
           total,
@@ -83,7 +121,6 @@ const parseAnalysisMetrics = (run: AnalysisRun) => {
 };
 
 // --- APP COMPONENT ---
-
 export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -92,18 +129,120 @@ export default function App() {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
   const [activeMode, setActiveMode] = useState<'github' | 'snippet'>('snippet');
   const [repoUrl, setRepoUrl] = useState('');
   const [focusArea, setFocusArea] = useState('');
   const [framework, setFramework] = useState<'playwright' | 'cypress' | 'jest'>('playwright');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [runs, setRuns] = useState<AnalysisRun[]>([]);
+  
+  // Stable state initializer to prevent double re-rendering on mount
+  const [runs, setRuns] = useState<AnalysisRun[]>(() => {
+    const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+    return localVaultRaw ? JSON.parse(localVaultRaw) : [];
+  });
+  
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [repos, setRepos] = useState<any[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>('');
   
+  const [isExporting, setIsExporting] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
+
+  useEffect(() => {
+    localStorage.setItem('ai-qa-github-token', githubToken);
+  }, [githubToken]);
+
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
+  
+  const metrics = useMemo(() => {
+    if (!activeItem) return null;
+    const m = parseAnalysisMetrics(activeItem);
+    if (m && m.type === 'playwright' && !activeItem.total_duration && activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED') {
+      const start = new Date(activeItem.created_at).getTime();
+      m.duration = ((now - start) / 1000).toFixed(1);
+    }
+    return m;
+  }, [activeItem, now]);
+
+  // Stable, optimized history fetch with deep changes check
+  const fetchHistory = useCallback(async () => {
+    try {
+      const clientId = getClientId();
+      const res = await fetch(`${API_URL}/api/analyses?clientId=${clientId}`);
+      let serverRuns: AnalysisRun[] = [];
+      
+      if (res.ok) {
+        serverRuns = await res.json();
+      }
+
+      // --- LOCAL VAULT PERSISTENCE ---
+      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+      let localVault: AnalysisRun[] = localVaultRaw ? JSON.parse(localVaultRaw) : [];
+
+      // Update vault with any new completed runs from server
+      serverRuns.forEach(serverRun => {
+        if (serverRun.status === 'COMPLETED' || serverRun.status === 'FAILED') {
+          const index = localVault.findIndex(v => v.id === serverRun.id);
+          if (index > -1) {
+            localVault[index] = serverRun;
+          } else {
+            localVault.unshift(serverRun);
+          }
+        }
+      });
+
+      if (localVault.length > 50) localVault = localVault.slice(0, 50);
+      localStorage.setItem('ai-qa-local-vault', JSON.stringify(localVault));
+
+      const mergedRuns = [...serverRuns.filter(s => s.status !== 'COMPLETED' && s.status !== 'FAILED')];
+      
+      localVault.forEach(vaultRun => {
+        if (!mergedRuns.find(m => m.id === vaultRun.id)) {
+          mergedRuns.push(vaultRun);
+        }
+      });
+
+      mergedRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      // Prevent unnecessary state replacements to stop flickering
+      setRuns(prev => {
+        const isSame = prev.length === mergedRuns.length && prev.every((item, i) => 
+          item.id === mergedRuns[i].id && item.status === mergedRuns[i].status && item.playwright_output === mergedRuns[i].playwright_output
+        );
+        return isSame ? prev : mergedRuns;
+      });
+    } catch (e) { 
+      console.error("History fetch error:", e);
+    }
+  }, []);
+
+  // Fetch initial history on mount
+  useEffect(() => {
+    getClientId();
+    fetchHistory();
+  }, [fetchHistory]);
+
+  // Adjust polling speed dynamically based on active runs
+  useEffect(() => {
+    const hasActiveRun = runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED');
+    const intervalTime = hasActiveRun ? 1500 : 5000;
+
+    const interval = setInterval(fetchHistory, intervalTime);
+    return () => clearInterval(interval);
+  }, [runs, fetchHistory]);
+
   // Check auth state on mount
   useEffect(() => {
     fetch(`${API_URL}/api/user`, { credentials: 'include' })
@@ -131,36 +270,6 @@ export default function App() {
     setRepoUrl(url);
   };
 
-  const [isExporting, setIsExporting] = useState(false);
-  const [showPricing, setShowPricing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
-  const [showTokenInput, setShowTokenInput] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('ai-qa-github-token', githubToken);
-  }, [githubToken]);
-
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
-  
-  const metrics = useMemo(() => {
-    if (!activeItem) return null;
-    const m = parseAnalysisMetrics(activeItem);
-    // Only run the live timer if the backend hasn't saved a total_duration yet
-    if (m && m.type === 'playwright' && !activeItem.total_duration && activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED') {
-      const start = new Date(activeItem.created_at).getTime();
-      m.duration = ((now - start) / 1000).toFixed(1);
-    }
-    return m;
-  }, [activeItem, now]);
-
   const handleExportPDF = async () => {
     const element = document.getElementById('report-container');
     if (!element || isExporting) return;
@@ -168,7 +277,6 @@ export default function App() {
     setIsExporting(true);
     
     try {
-      setIsExporting(true);
       await generateClientPDF(activeItem);
     } catch (err) {
       console.error("Client-side PDF generation failed:", err);
@@ -178,85 +286,11 @@ export default function App() {
     }
   };
 
-  const fetchHistory = async () => {
-    try {
-      const clientId = localStorage.getItem('ai-qa-client-id');
-      const res = await fetch(`${API_URL}/api/analyses?clientId=${clientId}`);
-      let serverRuns: AnalysisRun[] = [];
-      
-      if (res.ok) {
-        serverRuns = await res.json();
-      }
-
-      // --- LOCAL VAULT PERSISTENCE (FIX FOR VANISHING REPORTS) ---
-      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
-      let localVault: AnalysisRun[] = localVaultRaw ? JSON.parse(localVaultRaw) : [];
-
-      // Update vault with any new completed runs from server
-      serverRuns.forEach(serverRun => {
-        if (serverRun.status === 'COMPLETED' || serverRun.status === 'FAILED') {
-          const index = localVault.findIndex(v => v.id === serverRun.id);
-          if (index > -1) {
-            localVault[index] = serverRun;
-          } else {
-            localVault.unshift(serverRun);
-          }
-        }
-      });
-
-      // Limit vault size to ~50 reports to stay under localStorage 5MB limit
-      if (localVault.length > 50) localVault = localVault.slice(0, 50);
-      localStorage.setItem('ai-qa-local-vault', JSON.stringify(localVault));
-
-      // Merge: Active server runs + Persistent local vault
-      const mergedRuns = [...serverRuns.filter(s => s.status !== 'COMPLETED' && s.status !== 'FAILED')];
-      
-      // Add local vault items, avoiding duplicates
-      localVault.forEach(vaultRun => {
-        if (!mergedRuns.find(m => m.id === vaultRun.id)) {
-          mergedRuns.push(vaultRun);
-        }
-      });
-
-      // Sort by date (newest first)
-      mergedRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      
-      setRuns(mergedRuns);
-    } catch (e) { 
-      console.error("History fetch error:", e);
-      // Fallback to vault only if server is down
-      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
-      if (localVaultRaw) setRuns(JSON.parse(localVaultRaw));
-    }
-  };
-
-  useEffect(() => {
-    // Generate or retrieve a persistent client ID for this browser
-    if (!localStorage.getItem('ai-qa-client-id')) {
-      const newId = `cli-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`;
-      localStorage.setItem('ai-qa-client-id', newId);
-    }
-    
-    // Initial load from vault for instant responsiveness
-    const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
-    if (localVaultRaw) setRuns(JSON.parse(localVaultRaw));
-
-    fetchHistory();
-    
-    // DYNAMIC POLLING: High frequency (1s) during active runs, low frequency (5s) otherwise.
-    let intervalTime = 5000;
-    const activeRun = runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED');
-    if (activeRun) intervalTime = 1000;
-
-    const interval = setInterval(fetchHistory, intervalTime);
-    return () => clearInterval(interval);
-  }, [runs.length, runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED')]);
-
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    const clientId = localStorage.getItem('ai-qa-client-id');
+    const clientId = getClientId();
 
     try {
       if (activeMode === 'github') {
@@ -266,6 +300,11 @@ export default function App() {
           body: JSON.stringify({ repoUrl, taskType: 'E2E', clientId, framework, githubToken, focusArea })
         });
         if (!res.ok) throw new Error("Analysis failed to start");
+        
+        const data = await res.json();
+        if (data && data.analysisId) {
+          setActiveItemId(data.analysisId);
+        }
         setRepoUrl('');
         setFocusArea('');
       } else {
@@ -274,17 +313,165 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/analyze-snippet`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, clientId })
+          body: JSON.stringify({ code, clientId, fileName: selectedFile.name })
         });
         if (!res.ok) throw new Error("Snippet check failed");
+        
+        const data = await res.json();
+        if (data && data.analysisId) {
+          setActiveItemId(data.analysisId);
+        }
         setSelectedFile(null);
       }
-      setTimeout(fetchHistory, 1000);
+      setTimeout(fetchHistory, 500);
     } catch (err: any) {
       alert(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // High Fidelity Cyberpunk Rendering for Progress Audit
+  const renderLoadingState = (run: AnalysisRun) => {
+    const statusSteps = [
+      { label: 'Initializing Auditing Workspace', statuses: ['STARTED', 'ANALYSING', 'GENERATING_TESTS', 'TESTS_GENERATED', 'RUNNING_TESTS', 'COMPLETED'] },
+      { label: 'Running AST & Code Audit Errors', statuses: ['ANALYSING', 'GENERATING_TESTS', 'TESTS_GENERATED', 'RUNNING_TESTS', 'COMPLETED'] },
+      { label: 'Surgical Boundary Check Logic', statuses: ['GENERATING_TESTS', 'TESTS_GENERATED', 'RUNNING_TESTS', 'COMPLETED'] },
+      { label: 'Creating Autonomous Playwright Suite', statuses: ['TESTS_GENERATED', 'RUNNING_TESTS', 'COMPLETED'] },
+      { label: 'Validating Logic Explanation Report', statuses: ['RUNNING_TESTS', 'COMPLETED'] },
+    ];
+
+    const currentStatus = run.status;
+    let activeStepIdx = 0;
+    if (currentStatus === 'STARTED') activeStepIdx = 0;
+    else if (currentStatus === 'ANALYSING') activeStepIdx = 1;
+    else if (currentStatus === 'GENERATING_TESTS') activeStepIdx = 2;
+    else if (currentStatus === 'TESTS_GENERATED') activeStepIdx = 3;
+    else if (currentStatus === 'RUNNING_TESTS') activeStepIdx = 4;
+    
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6 text-slate-300 max-w-md mx-auto my-auto gap-6 animate-fade-in">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-cyan-500/10 blur-xl animate-pulse" />
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg relative border border-cyan-400/20 animate-bounce">
+            <Bot size={26} className="text-white animate-pulse" />
+          </div>
+        </div>
+        
+        <div className="text-center w-full">
+          <h4 className="text-xs font-black text-white uppercase tracking-wider mb-1">
+            Running Smart Diagnostics Loop
+          </h4>
+          <div className="flex items-center justify-center gap-1.5 opacity-60">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-ping" />
+            <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest">
+              STATUS: {currentStatus.replace('_', ' ')}
+            </span>
+          </div>
+        </div>
+
+        <div className="w-full bg-black/40 border border-white/5 rounded-lg p-4 font-mono text-[9px] space-y-2.5 text-left shadow-2xl">
+          {statusSteps.map((step, idx) => {
+            let stepStatus: 'pending' | 'active' | 'completed' = 'pending';
+            if (idx < activeStepIdx) stepStatus = 'completed';
+            else if (idx === activeStepIdx) stepStatus = 'active';
+            
+            return (
+              <div key={idx} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {stepStatus === 'completed' && <CheckCircle2 size={10} className="text-emerald-400" />}
+                  {stepStatus === 'active' && <span className="w-2.5 h-2.5 rounded-full border border-cyan-500 border-t-transparent animate-spin" />}
+                  {stepStatus === 'pending' && <div className="w-2.5 h-2.5 rounded-full bg-slate-800 border border-white/5" />}
+                  <span className={`transition-all ${stepStatus === 'completed' ? 'text-emerald-400 font-semibold' : stepStatus === 'active' ? 'text-cyan-400 font-bold' : 'text-slate-500'}`}>
+                    {step.label}
+                  </span>
+                </div>
+                <span className={`text-[8px] font-black uppercase tracking-widest ${stepStatus === 'completed' ? 'text-emerald-500/80' : stepStatus === 'active' ? 'text-cyan-400 animate-pulse' : 'text-slate-600'}`}>
+                  {stepStatus === 'completed' ? 'DONE' : stepStatus === 'active' ? 'RUNNING' : 'QUEUED'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // High Fidelity Cyberpunk Error State
+  const renderErrorState = (run: AnalysisRun) => {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6 text-slate-300 max-w-md mx-auto my-auto gap-4 animate-fade-in text-center">
+        <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shadow-lg text-rose-400">
+          <AlertCircle size={22} />
+        </div>
+        
+        <div>
+          <h4 className="text-xs font-black text-white uppercase tracking-wider mb-1">
+            Diagnostic Audit Failed
+          </h4>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            The autonomous AI worker encountered an unrecoverable failure during the audit compilation.
+          </p>
+        </div>
+
+        {run.playwright_output && (
+          <div className="w-full bg-rose-950/20 border border-rose-500/15 rounded-lg p-3 font-mono text-[9px] text-rose-300 text-left overflow-y-auto max-h-32 custom-scrollbar">
+            <span className="font-bold block uppercase tracking-wider mb-1 text-[8px] opacity-70">Error Trace:</span>
+            {run.playwright_output}
+          </div>
+        )}
+        
+        <button 
+          onClick={() => {
+            fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
+              const vaultRaw = localStorage.getItem('ai-qa-local-vault');
+              if (vaultRaw) {
+                const vault = JSON.parse(vaultRaw);
+                const newVault = vault.filter((v: any) => v.id !== run.id);
+                localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
+              }
+              setActiveItemId(null);
+              fetchHistory();
+            });
+          }}
+          className="text-[9px] font-black uppercase tracking-widest bg-rose-500/10 text-rose-400 border border-rose-500/20 px-4 py-1.5 rounded hover:bg-rose-500/20 transition-all active:scale-95"
+        >
+          Clear Broken Report
+        </button>
+      </div>
+    );
+  };
+
+  // Modern Fallback UI Dashboard
+  const renderWelcomeDashboard = () => {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6 text-center max-w-lg mx-auto my-auto gap-6 animate-fade-in">
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/10 to-indigo-500/10 flex items-center justify-center border border-cyan-500/15 relative shadow-2xl">
+          <Bot size={24} className="text-cyan-400 animate-pulse" />
+          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        </div>
+        
+        <div>
+          <h3 className="text-xs font-black text-white uppercase tracking-wider mb-1">
+            Ready for Smart Audit Runs
+          </h3>
+          <p className="text-[10px] text-slate-400 leading-relaxed max-w-sm mx-auto">
+            Upload a local file snippet or select a Github repository workspace to start our autonomous auditing agents.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 w-full max-w-sm text-left">
+          <div className="bg-white/[0.02] border border-white/5 p-3 rounded-lg flex flex-col gap-1 hover:bg-white/[0.04] transition-all">
+            <span className="text-[8px] font-black text-cyan-400 uppercase tracking-widest">Snippet Audits</span>
+            <p className="text-[9px] text-slate-500 leading-tight">Drag and drop code files to scan for logic errors, race conditions, and static analysis bugs.</p>
+          </div>
+          <div className="bg-white/[0.02] border border-white/5 p-3 rounded-lg flex flex-col gap-1 hover:bg-white/[0.04] transition-all">
+            <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">Workspace Engine</span>
+            <p className="text-[9px] text-slate-500 leading-tight">Generate fully functional Playwright test suites and complete CI/CD configuration files.</p>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -492,12 +679,12 @@ export default function App() {
           </form>
         </section>
 
-        {/* Padding adjustment for the button below */}
+        {/* Padding adjustment */}
         <div className="h-14" />
 
         {/* Board View */}
         <section className="flex flex-col lg:flex-row gap-2.5 flex-1 min-h-0">
-          {/* List Sidebar: Project-Based Workspaces */}
+          {/* List Sidebar: Stable Workspaces List */}
           <div className="w-[180px] flex flex-col gap-3 overflow-y-auto pr-0.5 custom-scrollbar">
             <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-1">Projects / Workspaces</h3>
             
@@ -507,7 +694,6 @@ export default function App() {
                 return activeMode === 'snippet' ? isSnippet : !isSnippet;
               });
 
-              // Group runs by repository URL
               const groups: { [key: string]: AnalysisRun[] } = {};
               filteredRuns.forEach(run => {
                 const repo = run.repo_url;
@@ -525,37 +711,50 @@ export default function App() {
                       <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter truncate">{repoName}</span>
                     </div>
                     
-                    {repoRuns.map(run => (
-                      <div
-                        key={run.id} onClick={() => setActiveItemId(run.id)}
-                        className={`cursor-pointer rounded-md p-2 border flex flex-col gap-1 transition-all group/item ${activeItemId === run.id ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <span className="text-[9px] text-white font-bold truncate max-w-[80%]">
-                            {new Date(run.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          <button onClick={(e) => { 
-                            e.stopPropagation(); 
-                            fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
-                              const vaultRaw = localStorage.getItem('ai-qa-local-vault');
-                              if (vaultRaw) {
-                                const vault = JSON.parse(vaultRaw);
-                                const newVault = vault.filter((v: any) => v.id !== run.id);
-                                localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
-                              }
-                              fetchHistory();
-                            }); 
-                          }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all"><Trash2 size={8} /></button>
+                    {repoRuns.map(run => {
+                      const title = getReportTitle(run);
+                      return (
+                        <div
+                          key={run.id} onClick={() => setActiveItemId(run.id)}
+                          className={`cursor-pointer rounded-md p-2 border flex flex-col gap-1 transition-all group/item ${activeItemId === run.id ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
+                        >
+                          <div className="flex justify-between items-start w-full gap-1">
+                            <span className="text-[9.5px] text-white font-bold truncate max-w-[85%] group-hover/item:text-cyan-400 transition-all" title={title}>
+                              {title}
+                            </span>
+                            <button onClick={(e) => { 
+                              e.stopPropagation(); 
+                              fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => {
+                                const vaultRaw = localStorage.getItem('ai-qa-local-vault');
+                                if (vaultRaw) {
+                                  const vault = JSON.parse(vaultRaw);
+                                  const newVault = vault.filter((v: any) => v.id !== run.id);
+                                  localStorage.setItem('ai-qa-local-vault', JSON.stringify(newVault));
+                                }
+                                if (activeItemId === run.id) {
+                                  setActiveItemId(null);
+                                }
+                                fetchHistory();
+                              }); 
+                            }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all shrink-0"><Trash2 size={8} /></button>
+                          </div>
+                          <div className="flex items-center justify-between w-full mt-0.5">
+                            <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
+                              (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                              run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                              'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-pulse'
+                            }`}>
+                              {run.status.replace('_', ' ')}
+                            </div>
+                            {run.framework_signature && (
+                              <span className="text-[7.5px] text-slate-500 font-medium tracking-tight">
+                                {run.framework_signature}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className={`text-[7px] uppercase font-black px-1.5 py-0.5 rounded border self-start ${
-                          (run.status === 'COMPLETED' || run.status === 'TESTS_GENERATED' || run.status === 'RUNNING_TESTS') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                          run.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                          'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-pulse'
-                        }`}>
-                          {run.status.replace('_', ' ')}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               });
@@ -563,7 +762,7 @@ export default function App() {
           </div>
 
           {/* Detailed Report */}
-          <div className="flex-1 glass-panel border border-white/10 rounded-lg p-4 overflow-y-auto relative">
+          <div className="flex-1 glass-panel border border-white/10 rounded-lg p-4 overflow-y-auto relative flex flex-col min-h-0">
             <ErrorBoundary fallback={
               <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
                 <AlertCircle size={32} className="text-amber-500" />
@@ -572,10 +771,11 @@ export default function App() {
               </div>
             }>
             {!activeItem ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-40">
-                <Terminal size={32} />
-                <p className="text-[10px] font-bold mt-2 uppercase">Select a Report</p>
-              </div>
+              renderWelcomeDashboard()
+            ) : activeItem.status !== 'COMPLETED' && activeItem.status !== 'FAILED' ? (
+              renderLoadingState(activeItem)
+            ) : activeItem.status === 'FAILED' ? (
+              renderErrorState(activeItem)
             ) : (
               <div className="flex flex-col gap-4 animate-fade-in" id="report-container">
                 <header className="flex items-center justify-between border-b border-white/5 pb-2 text-white">
@@ -615,7 +815,7 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      <div className="flex gap-2.5 animate-fade-in shrink-0 w-full">
+                      <div className="flex gap-2.5 animate-fade-in shrink-0 w-full col-span-3">
                         <div className="flex-1 bg-slate-800/40 border border-white/5 p-2 rounded-lg text-center shadow-lg">
                           <span className="block text-[7px] text-slate-400 uppercase font-black tracking-widest mb-0.5">Execution Time</span>
                           <span className="text-sm font-black text-slate-200">{metrics.duration}s</span>
@@ -639,7 +839,6 @@ export default function App() {
                           h2: ({ children }) => <h2 className="text-[13px] font-bold text-cyan-400 mt-6 mb-1">{children}</h2>,
                           h3: ({ children }) => {
                             const text = String(children);
-                            // Robust detection for "Corrected Solution" regardless of emoji/number prefix
                             if (text.toLowerCase().includes("corrected solution")) {
                               return (
                                 <div className="mt-8 mb-3 flex items-center gap-2">
@@ -664,7 +863,6 @@ export default function App() {
                             const match = /language-(\w+)/.exec(className || '')
                             const codeString = String(children).replace(/\n$/, '');
 
-                            // Check if this is likely the primary fix block (topmost or section 3)
                             const isFixBlock = !node.position?.start.line || node.position?.start.line < 30;
 
                             if (!inline && match) {
@@ -690,7 +888,7 @@ export default function App() {
                                   </div>
                                   <SyntaxHighlighter
                                     {...props} children={codeString}
-                                    style={codeTheme as any} language={match[1]} PreTag="div"
+                                    style={prismStyle as any} language={match[1]} PreTag="div"
                                     customStyle={{ margin: 0, padding: '1.25rem', fontSize: '11px', lineHeight: '1.7', background: 'transparent' }}
                                   />
                                 </div>

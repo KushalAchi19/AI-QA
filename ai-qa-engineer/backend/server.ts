@@ -223,7 +223,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
 });
 
 app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextFunction) => {
-    const { code, clientId } = req.body;
+    const { code, clientId, fileName } = req.body;
     if (!code) {
         return res.status(400).json({ error: 'code snippet is required' });
     }
@@ -233,6 +233,9 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
 
     try {
         const analysisId = await createAnalysis('Code Snippet Debugging', clientId);
+        if (fileName) {
+            await updateAnalysis(analysisId, { test_file: fileName });
+        }
         res.json({ message: 'Analysis started', analysisId, status: 'ANALYZING' });
 
         (async () => {
