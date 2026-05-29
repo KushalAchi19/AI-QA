@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import session from 'express-session';
 import passport from 'passport';
 import { Strategy as GitHubStrategy } from 'passport-github2';
+import { exec } from 'child_process';
+import path from 'path';
+import fsPromises from 'fs/promises';
 
 dotenv.config();
 
@@ -62,7 +65,6 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: (origin, callback) => {
-        // allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         if (
             allowedOrigins.indexOf(origin) !== -1 ||
@@ -125,17 +127,31 @@ app.get('/api/user/repos', async (req, res) => {
     }
 });
 
-
 import { analyzeRepository } from './services/repoAnalyzer';
 import { generateTests, analyzeErrorSnippet } from './services/testGenerator';
-import { runGeneratedTest, prepareEnvironment, runPlaywrightTest } from './services/testRunner';
-import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis, getAnalysisById } from './services/database';
+import { runPlaywrightTest, prepareEnvironment } from './services/testRunner';
+import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis } from './services/database';
 import { fixFailedTest } from './services/agenticFixer';
 
+// --- IN-MEMORY ACTIVE JOBS & SSE STREAM REGISTRIES ---
+interface ActiveJob {
+    abortController?: AbortController;
+    serverProcess?: any;
+}
+const activeJobs = new Map<string, ActiveJob>();
+const sseClients = new Map<string, Response[]>();
 
-
-
-
+// Broadcasts real-time events to all SSE listeners
+function broadcastProgress(analysisId: string, stage: string, percent: number, details?: string) {
+    const clients = sseClients.get(analysisId);
+    if (clients) {
+        clients.forEach(res => {
+            res.write(`data: ${JSON.stringify({ status: stage, percent, details })}\n\n`);
+        });
+    }
+    // Update db in the background to persist status
+    updateAnalysis(analysisId, { status: stage as any }).catch(() => {});
+}
 
 // Root health check / welcome route
 app.get('/', (req, res) => {
@@ -156,7 +172,69 @@ app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction)
     }
 });
 
-// Run a new repository analysis and test generation
+// SSE Streaming Connection Endpoint
+app.get('/api/analyses/:id/stream', (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    if (!sseClients.has(id)) {
+        sseClients.set(id, []);
+    }
+    sseClients.get(id)!.push(res);
+
+    req.on('close', () => {
+        const clients = sseClients.get(id);
+        if (clients) {
+            sseClients.set(id, clients.filter(c => c !== res));
+            if (sseClients.get(id)!.length === 0) {
+                sseClients.delete(id);
+            }
+        }
+    });
+});
+
+// Cancel Analysis Endpoint
+app.post('/api/analyses/:id/cancel', async (req: Request, res: Response, next: NextFunction) => {
+    const id = req.params.id as string;
+    console.log(`🛑 User requested cancellation for job ${id}`);
+    
+    try {
+        const job = activeJobs.get(id);
+        if (job) {
+            if (job.abortController) {
+                job.abortController.abort();
+            }
+            if (job.serverProcess) {
+                const pid = job.serverProcess.pid;
+                if (pid) {
+                    if (process.platform === 'win32') {
+                        exec(`taskkill /pid ${pid} /t /f`);
+                    } else {
+                        exec(`kill -9 ${pid}`);
+                    }
+                }
+            }
+            activeJobs.delete(id);
+        }
+
+        await updateAnalysis(id, {
+            status: 'FAILED',
+            playwright_output: 'Analysis was cancelled by the user.'
+        });
+
+        broadcastProgress(id, 'FAILED', 100, 'Analysis was cancelled by the user.');
+
+        res.json({ message: 'Analysis cancelled successfully', id });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Run a new repository analysis and test generation (Asynchronous Local Execution)
 app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction) => {
     const { repoUrl, clientId, framework = 'playwright', githubToken, focusArea = '' } = req.body;
     if (!repoUrl) {
@@ -167,55 +245,139 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
     }
 
     try {
-        // 1. Initialize Record in Supabase
+        // 1. Initialize Record in DB
         const analysisId = await createAnalysis(repoUrl, clientId);
 
-        // 2. DISPATCH WORKER (GitHub Actions)
-        // This offloads 100% of the compute cost to GitHub
-        const GITHUB_TOKEN = process.env.GITHUB_WORKER_TOKEN;
-        const REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'KushalAchi19'; // Default from user info
-        const REPO_NAME = process.env.GITHUB_REPO_NAME || 'ai-qa-engineer';
-
-        if (GITHUB_TOKEN) {
-            console.log(`📡 Dispatching Worker for ${analysisId}...`);
-            const dispatchResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/ai-worker.yml/dispatches`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${GITHUB_TOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'AI-QA-Engineer-API'
-                },
-                body: JSON.stringify({
-                    ref: 'main',
-                    inputs: {
-                        analysisId,
-                        repoUrl,
-                        framework,
-                        focusArea,
-                        githubToken
-                    }
-                })
-            });
-
-            if (!dispatchResponse.ok) {
-                const errText = await dispatchResponse.text();
-                console.error(`❌ Worker Dispatch Failed: ${errText}`);
-                // Fallback to local if dispatch fails? Or just fail?
-                // For 50k users, we MUST use workers.
-            } else {
-                console.log(`✅ Worker Dispatched successfully for ${analysisId}`);
-            }
-        } else {
-            console.warn("⚠️ GITHUB_WORKER_TOKEN missing. Analysis will be recorded but not processed.");
-        }
-
-        // Send immediate response so frontend is "Instant"
+        // Send immediate response so frontend is instant
         res.json({ 
-            message: 'Analysis dispatched to global worker pool', 
+            message: 'Analysis initiated', 
             analysisId, 
             status: 'STARTED' 
         });
+
+        // 2. Start Asynchronous Local Pipeline Run
+        const abortController = new AbortController();
+        activeJobs.set(analysisId, { abortController });
+
+        // Non-blocking background worker
+        (async () => {
+            const onProgress = (stage: string, percent: number) => {
+                broadcastProgress(analysisId, stage, percent);
+            };
+
+            try {
+                const startTime = Date.now();
+                onProgress('STARTED', 5);
+
+                // Stage 1: Fetch Repository & Filter Files
+                const { files, cloneFolder, isHeadless } = await analyzeRepository(
+                    repoUrl,
+                    analysisId,
+                    githubToken,
+                    onProgress
+                );
+
+                if (abortController.signal.aborted) {
+                    throw new Error("Analysis aborted by user");
+                }
+
+                // Stage 2: Run AI Analysis
+                onProgress('GENERATING_TESTS', 65);
+                const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework, focusArea);
+                const { fileName, code, cicdCode, fullReport, frameworkSignature } = aiResult;
+
+                if (abortController.signal.aborted) {
+                    throw new Error("Analysis aborted by user");
+                }
+
+                // Stage 3: Store AI generated report details & Mark COMPLETE
+                onProgress('TESTS_GENERATED', 85);
+                await updateAnalysis(analysisId, {
+                    test_file: fileName,
+                    test_code: code,
+                    cicd_code: cicdCode,
+                    playwright_output: fullReport,
+                    framework_signature: frameworkSignature,
+                    total_duration: (Date.now() - startTime) / 1000,
+                    status: 'COMPLETED'
+                });
+
+                onProgress('COMPLETED', 100);
+                activeJobs.delete(analysisId);
+
+                // --- Background Playwright Verification (Path A - Optional & Asynchronous) ---
+                (async () => {
+                    let serverProcess: any = null;
+                    try {
+                        const envResult = await prepareEnvironment(cloneFolder, isHeadless);
+                        serverProcess = envResult.serverProcess;
+
+                        // Keep track of subprocess for cancel triggers
+                        const job = activeJobs.get(analysisId);
+                        if (job) {
+                            job.serverProcess = serverProcess;
+                        }
+
+                        const { executionLog, error: envError } = envResult;
+                        if (envError) throw new Error(envError);
+
+                        if (framework === 'playwright') {
+                            let testResult = await runPlaywrightTest(fileName, executionLog);
+                            
+                            // Check for failures to trigger the agentic loop
+                            const hasFailures = testResult.suites?.some((s: any) => 
+                                s.specs?.some((sp: any) => sp.tests?.some((t: any) => 
+                                    t.results?.some((r: any) => r.status !== 'passed')
+                                ))
+                            );
+
+                            if (hasFailures || testResult.error) {
+                                console.log(`Verification failed for ${analysisId}. Retrying with Agentic Fixer...`);
+                                const errorSummary = testResult.error || "Execution checks failed.";
+                                const fixedCode = await fixFailedTest(repoUrl, code, errorSummary + "\n" + executionLog, framework);
+                                
+                                const fixedFileName = `fixed-${Date.now()}.spec.ts`;
+                                const fixedFilePath = path.join(__dirname, 'tests-generated', fixedFileName);
+                                
+                                await fsPromises.writeFile(fixedFilePath, fixedCode, 'utf8');
+                                testResult = await runPlaywrightTest(fixedFileName, executionLog);
+
+                                await updateAnalysis(analysisId, {
+                                    test_code: fixedCode,
+                                    test_file: fixedFileName
+                                });
+                            }
+
+                            // Append Execution Results to output
+                            const finalOutput = `${fullReport}\n\n### 🖥️ 5. Execution Results\n\`\`\`json\n${JSON.stringify(testResult, null, 2)}\n\`\`\``;
+                            await updateAnalysis(analysisId, { playwright_output: finalOutput });
+                        }
+                    } catch (e: any) {
+                        console.warn(`[Background Verification Error] for ${analysisId}: ${e.message}`);
+                    } finally {
+                        if (serverProcess) {
+                            const pid = serverProcess.pid;
+                            if (pid) {
+                                if (process.platform === 'win32') {
+                                    try { exec(`taskkill /pid ${pid} /t /f`); } catch (e) {}
+                                } else {
+                                    try { exec(`kill -9 ${pid}`); } catch (e) {}
+                                }
+                            }
+                        }
+                    }
+                })();
+
+            } catch (err: any) {
+                console.error(`❌ Local Worker Failed for ${analysisId}:`, err);
+                await updateAnalysis(analysisId, {
+                    status: 'FAILED',
+                    playwright_output: `Analysis Failed: ${err.message}`
+                });
+                broadcastProgress(analysisId, 'FAILED', 100, err.message);
+                activeJobs.delete(analysisId);
+            }
+        })();
 
     } catch (err) {
         next(err);
@@ -236,7 +398,7 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
         if (fileName) {
             await updateAnalysis(analysisId, { test_file: fileName });
         }
-        res.json({ message: 'Analysis started', analysisId, status: 'ANALYZING' });
+        res.json({ message: 'Analysis started', analysisId, status: 'ANALYSING' });
 
         (async () => {
             try {
@@ -260,10 +422,6 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
         next(err);
     }
 });
-
-// PDF Export endpoint moved to client-side for Zero-Cost efficiency
-// Endpoint removed to save server resources (Puppeteer/Chromium)
-
 
 // Delete an analysis
 app.delete('/api/analyses/:id', async (req: Request, res: Response, next: NextFunction) => {
