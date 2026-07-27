@@ -15,7 +15,6 @@
   "dependencies": {
     "@google/genai": "latest",
     "@google/generative-ai": "^0.24.1",
-    "@supabase/supabase-js": "^2.105.1",
     "@types/express-session": "^1.19.0",
     "@types/marked": "^5.0.2",
     "@types/passport": "^1.0.17",

@@ -139,8 +139,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   
   const [runs, setRuns] = useState<AnalysisRun[]>(() => {
-    const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
-    return localVaultRaw ? JSON.parse(localVaultRaw) : [];
+    try {
+      const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
+      return localVaultRaw ? JSON.parse(localVaultRaw) : [];
+    } catch {
+      return [];
+    }
   });
   
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
@@ -164,7 +168,12 @@ export default function App() {
       let serverRuns: AnalysisRun[] = [];
       if (res.ok) serverRuns = await res.json();
 
-      let localVault: AnalysisRun[] = JSON.parse(localStorage.getItem('ai-qa-local-vault') || '[]');
+      let localVault: AnalysisRun[] = [];
+      try {
+        localVault = JSON.parse(localStorage.getItem('ai-qa-local-vault') || '[]');
+      } catch {
+        localVault = [];
+      }
       
       serverRuns.forEach(serverRun => {
         if (serverRun.status === 'COMPLETED' || serverRun.status === 'FAILED') {
@@ -221,7 +230,7 @@ export default function App() {
     };
 
     return () => eventSource.close();
-  }, [activeItemId]); // Only binds on activeId change
+  }, [activeItemId, fetchHistory]); // Bind on activeId change; fetchHistory is stable (useCallback)
 
   useEffect(() => {
     fetch(`${API_URL}/api/user`, { credentials: 'include' })

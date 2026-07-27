@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import path from 'path';
 import { promises as fs } from 'fs';
 import fsSync from 'fs';
+import { SkillProfile } from './repoAnalyzer';
 
 const getModel = () => {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -39,7 +40,7 @@ function extractCodeBlock(markdown: string): string {
 /**
  * Generates tests based on code context using Gemini 2.5 Flash
  */
-export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright', focusArea: string = '') {
+export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright', focusArea: string = '', skillProfile?: SkillProfile) {
     const model = getModel();
 
     const filesContext = repoFiles.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n');
@@ -48,6 +49,23 @@ export async function generateTests(repoUrl: string, repoFiles: {name: string, c
 ### 🎯 STRATEGIC FOCUS: ${focusArea}
 The user has requested a prioritized analysis and testing for the area described above. 
 You MUST give extra attention to files, logic, and edge cases related to this specific intent.
+` : '';
+
+    // Inject detected tech-stack skills so AI generates framework-accurate tests
+    const skillsPrompt = skillProfile && skillProfile.allSkills.length > 0 ? `
+### 🧠 Detected Skills & Tech Stack
+This repository was statically analyzed. The following technologies were detected with high confidence:
+- **Languages**: ${skillProfile.languages.join(', ') || 'N/A'}
+- **Frameworks**: ${skillProfile.frameworks.join(', ') || 'N/A'}
+- **Databases**: ${skillProfile.databases.join(', ') || 'N/A'}
+- **Auth**: ${skillProfile.auth.join(', ') || 'N/A'}
+- **Testing Tools**: ${skillProfile.testing.join(', ') || 'N/A'}
+- **Patterns**: ${skillProfile.patterns.join(', ') || 'N/A'}
+- **DevOps**: ${skillProfile.devops.join(', ') || 'N/A'}
+- **Package Manager**: ${skillProfile.packageManager}
+
+You MUST use this context to write tests that are accurate for this specific stack.
+Do NOT hallucinate dependencies, selectors, or APIs not consistent with the above stack.
 ` : '';
 
     let headlessPrompt = '';
@@ -65,6 +83,7 @@ You MUST use these explicit selectors to test their CLI application over the DOM
 
     const prompt = `
 You are a Senior AI QA Engineer. Analyze this repository: ${repoUrl}.
+${skillsPrompt}
 ${focusPrompt}
 ${headlessPrompt}
 

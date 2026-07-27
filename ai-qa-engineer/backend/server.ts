@@ -10,11 +10,19 @@ import fsPromises from 'fs/promises';
 
 dotenv.config();
 
+// --- Global unhandled rejection/exception safety nets ---
+process.on('unhandledRejection', (reason: any) => {
+    console.error('❌ Unhandled Promise Rejection:', reason?.message || reason);
+    // Don't crash the server for unhandled rejections in background tasks
+});
+process.on('uncaughtException', (err) => {
+    console.error('❌ Uncaught Exception:', err.message);
+    // Log but don't crash – express will keep serving
+});
+
 // --- STARTUP GUARD: Ensure all environment variables are present ---
 const REQUIRED_VARS = [
     'GEMINI_API_KEY',
-    'SUPABASE_URL',
-    'SUPABASE_KEY',
     'GITHUB_WORKER_TOKEN',
     'GITHUB_CLIENT_ID',
     'GITHUB_CLIENT_SECRET',
@@ -35,10 +43,16 @@ const PORT = process.env.PORT || 5000;
 
 // Initialize Passport & Session
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'ai-qa-secret',
+    secret: process.env.SESSION_SECRET || (() => {
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('SESSION_SECRET env variable must be set in production');
+        }
+        console.warn('⚠️  SESSION_SECRET not set — using insecure default (development only)');
+        return 'ai-qa-secret-dev-only';
+    })(),
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // Set secure: true in production
+    cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
 }));
 
 app.use(passport.initialize());
@@ -270,7 +284,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
                 onProgress('STARTED', 5);
 
                 // Stage 1: Fetch Repository & Filter Files
-                const { files, cloneFolder, isHeadless } = await analyzeRepository(
+                const { files, cloneFolder, isHeadless, skillProfile } = await analyzeRepository(
                     repoUrl,
                     analysisId,
                     githubToken,
@@ -283,7 +297,7 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
 
                 // Stage 2: Run AI Analysis
                 onProgress('GENERATING_TESTS', 65);
-                const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework, focusArea);
+                const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework, focusArea, skillProfile);
                 const { fileName, code, cicdCode, fullReport, frameworkSignature } = aiResult;
 
                 if (abortController.signal.aborted) {
@@ -292,12 +306,16 @@ app.post('/api/analyze', async (req: Request, res: Response, next: NextFunction)
 
                 // Stage 3: Store AI generated report details & Mark COMPLETE
                 onProgress('TESTS_GENERATED', 85);
+                // Persist allSkills alongside the human-readable framework signature
+                const skillsTag = skillProfile?.allSkills?.length
+                    ? `${frameworkSignature} | ${skillProfile.allSkills.slice(0, 8).join(', ')}`
+                    : frameworkSignature;
                 await updateAnalysis(analysisId, {
                     test_file: fileName,
                     test_code: code,
                     cicd_code: cicdCode,
                     playwright_output: fullReport,
-                    framework_signature: frameworkSignature,
+                    framework_signature: skillsTag,
                     total_duration: (Date.now() - startTime) / 1000,
                     status: 'COMPLETED'
                 });

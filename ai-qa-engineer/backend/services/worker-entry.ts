@@ -28,10 +28,10 @@ async function runWorker() {
     const startTime = Date.now();
 
     // 1. Fetch repo metadata and clone
-    const { files, cloneFolder, isHeadless } = await analyzeRepository(repoUrl, analysisId, githubToken);
+    const { files, cloneFolder, isHeadless, skillProfile } = await analyzeRepository(repoUrl, analysisId, githubToken);
 
     // 2. Run Diagnostic Analysis (AI Part)
-    const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework, focusArea);
+    const aiResult = await generateTests(repoUrl, files, cloneFolder, isHeadless, framework, focusArea, skillProfile);
     const { fileName, code, cicdCode, fullReport, frameworkSignature } = aiResult;
 
     // 3. Store Intermediate Results

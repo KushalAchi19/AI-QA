@@ -29,17 +29,29 @@ export async function prepareEnvironment(cloneFolder: string, isHeadless: boolea
         while (Date.now() - startTime < timeoutMs) {
             try {
                 const res = await fetch(url);
-                if (res.ok) return true;
-            } catch (error) { }
-            await new Promise(r => setTimeout(r, 1000));
+                if (res.ok || res.status < 500) return true; // Accept any non-server-error response
+            } catch (_) { /* Server not ready yet */ }
+            await new Promise(r => setTimeout(r, 1500));
         }
+        log(`⚠️ Server did not respond at ${url} within ${timeoutMs / 1000}s — proceeding anyway.`);
         return false;
     }
 
     try {
         log("Force-clearing any dangling processes on port 3030...");
         if (process.platform === 'win32') {
-            try { await execPromise('for /f "tokens=5" %a in (\'netstat -aon ^| findstr :3030\') do taskkill /f /pid %a'); } catch (e) {}
+            try {
+                // Get PIDs listening on port 3030, kill each
+                const { stdout } = await execPromise('netstat -ano | findstr ":3030 "').catch(() => ({ stdout: '' }));
+                const pids = [...new Set(
+                    stdout.split('\n')
+                        .map(line => line.trim().split(/\s+/).pop())
+                        .filter((p): p is string => !!p && /^\d+$/.test(p) && p !== '0')
+                )];
+                for (const pid of pids) {
+                    await execPromise(`taskkill /f /pid ${pid}`).catch(() => {});
+                }
+            } catch (e) {}
         } else {
             try { await execPromise('lsof -t -i:3030 | xargs kill -9'); } catch (e) {}
         }
