@@ -454,9 +454,19 @@ export default function App() {
                             <div className="flex justify-between items-start w-full gap-2 relative z-10">
                               <span className="text-[10.5px] text-white font-bold truncate max-w-[85%] group-hover/item:text-cyan-400 transition-colors" title={title}>{title}</span>
                               <button onClick={(e) => { 
-                                e.stopPropagation(); 
-                                fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).then(() => { fetchHistory(); }); 
-                              }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all shrink-0"><Trash2 size={12} /></button>
+                                e.stopPropagation();
+                                // Immediately remove from localStorage vault so it doesn't resurface after fetch
+                                try {
+                                  const vault: AnalysisRun[] = JSON.parse(localStorage.getItem('ai-qa-local-vault') || '[]');
+                                  localStorage.setItem('ai-qa-local-vault', JSON.stringify(vault.filter(v => v.id !== run.id)));
+                                } catch {}
+                                // Clear active panel if this item was selected
+                                if (activeItemId === run.id) setActiveItemId(null);
+                                // Optimistically remove from UI immediately
+                                setRuns(prev => prev.filter(r => r.id !== run.id));
+                                // Then delete from server
+                                fetch(`${API_URL}/api/analyses/${run.id}`, { method: 'DELETE' }).catch(() => { fetchHistory(); });
+                              }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all shrink-0 p-1 rounded"><Trash2 size={12} /></button>
                             </div>
                             
                             <div className="flex items-center justify-between w-full mt-1 relative z-10">
