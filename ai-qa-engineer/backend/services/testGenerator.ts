@@ -4,15 +4,46 @@ import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import { SkillProfile } from './repoAnalyzer';
 
-const getModel = () => {
+const getGenAIInstance = () => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         throw new Error("GEMINI_API_KEY is missing! Please add it to backend/.env");
     }
-    const genAI = new GoogleGenerativeAI(apiKey);
-    // Using gemini-2.5-flash as requested by the user
-    return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    return new GoogleGenerativeAI(apiKey);
 };
+
+export async function generateContentWithRetry(prompt: string, primaryModel = "gemini-2.5-flash", fallbackModel = "gemini-1.5-flash", retries = 3, initialDelay = 1000) {
+    const genAI = getGenAIInstance();
+    let model = genAI.getGenerativeModel({ model: primaryModel });
+    let delay = initialDelay;
+
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await model.generateContent(prompt);
+        } catch (error: any) {
+            const errorMsg = error.message || '';
+            const is503or429 = errorMsg.includes('503') || errorMsg.includes('429') || error.status === 503 || error.status === 429;
+            if (is503or429 && i < retries - 1) {
+                console.warn(`⚠️ Gemini API (${primaryModel}) returned 503/429. Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+                continue;
+            }
+            if (is503or429 && fallbackModel) {
+                console.warn(`⚠️ Gemini API (${primaryModel}) exhausted retries. Falling back to ${fallbackModel}...`);
+                try {
+                    const fallback = genAI.getGenerativeModel({ model: fallbackModel });
+                    return await fallback.generateContent(prompt);
+                } catch (fallbackError) {
+                    console.error(`❌ Fallback model ${fallbackModel} also failed:`, fallbackError);
+                    throw error;
+                }
+            }
+            throw error;
+        }
+    }
+    throw new Error("Failed to generate content: Unknown error");
+}
 
 /**
  * Sanitizes AI-generated code by removing markdown block wrappers.
@@ -41,8 +72,6 @@ function extractCodeBlock(markdown: string): string {
  * Generates tests based on code context using Gemini 2.5 Flash
  */
 export async function generateTests(repoUrl: string, repoFiles: {name: string, content: string}[], cloneFolder: string, isHeadless: boolean, framework: string = 'playwright', focusArea: string = '', skillProfile?: SkillProfile) {
-    const model = getModel();
-
     const filesContext = repoFiles.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n');
 
     const focusPrompt = focusArea ? `
@@ -115,7 +144,7 @@ ${filesContext}
 `;
 
     try {
-        const result = await model.generateContent(prompt);
+        const result = await generateContentWithRetry(prompt);
         const response = await result.response;
         const fullReport = response.text();
         
@@ -149,8 +178,6 @@ ${filesContext}
 }
 
 export async function analyzeErrorSnippet(code: string) {
-    const model = getModel();
-
     const prompt = `You are a Senior Principal Engineer and QA Specialist.
 Analyze the following code for logic bugs, syntax errors, and edge cases.
 
@@ -179,7 +206,7 @@ Strictly adhere to this response format with these headers:
 [Suggest 1-2 professional patterns to avoid this error in the future.]`;
 
     try {
-        const result = await model.generateContent(prompt);
+        const result = await generateContentWithRetry(prompt);
         const response = await result.response;
         return response.text() || 'No explanation generated.';
     } catch (error: any) {
