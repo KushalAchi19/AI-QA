@@ -420,19 +420,20 @@ app.post('/api/analyze-snippet', async (req: Request, res: Response, next: NextF
 
         (async () => {
             try {
+                broadcastProgress(analysisId, 'ANALYSING', 30, 'Analyzing snippet...');
                 const aiExplanation = await analyzeErrorSnippet(code);
 
                 await updateAnalysis(analysisId, {
-                    status: 'COMPLETED',
                     test_code: code,
                     playwright_output: aiExplanation
                 });
+                broadcastProgress(analysisId, 'COMPLETED', 100, 'Analysis completed.');
             } catch (asyncError: any) {
                 console.error(`Async Error during snippet analysis ${analysisId}:`, asyncError);
                 await updateAnalysis(analysisId, {
-                    status: 'FAILED',
                     playwright_output: asyncError.message
                 });
+                broadcastProgress(analysisId, 'FAILED', 100, asyncError.message);
             }
         })();
 
