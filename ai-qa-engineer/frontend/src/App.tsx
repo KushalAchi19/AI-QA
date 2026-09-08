@@ -1,18 +1,42 @@
+// ============================================================================
+// COMPONENT: MAIN APPLICATION DASHBOARD (App.tsx)
+// This is the core frontend component of the AI QA Engineer platform.
+// It manages:
+// 1. Mode switching: Snippet Diagnostics (single file) vs Repository Engine (GitHub).
+// 2. GitHub OAuth user authentication and personal repo selection.
+// 3. Client session isolation using unique browser client IDs.
+// 4. Local storage history vault (`ai-qa-local-vault`) for offline persistence.
+// 5. Real-time progress tracking via Server-Sent Events (SSE) (0% -> 100%).
+// 6. Interactive markdown prose rendering with Prism syntax highlighting.
+// 7. Copy-to-clipboard code blocks and client-side PDF export triggers.
+// ============================================================================
+
+// Import React hooks for component state, side effects, refs, memoization, and callback caching.
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+// Import ReactMarkdown to render AI-generated markdown reports as styled HTML.
 import ReactMarkdown from 'react-markdown';
+// Import Prism syntax highlighter to provide VS Code-style color highlighting for code blocks.
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+// Import framer-motion for smooth UI transitions, layout animations, and entry effects.
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Import SVG iconography from lucide-react.
 import {
   FileCode, Terminal, Globe, AlertCircle, CheckCircle2,
   ChevronRight, Zap, Copy, Bot, Trash2, ClipboardCheck, Download, Check, XCircle
 } from 'lucide-react';
+
+// Import global styles.
 import './index.css';
+// Import client-side PDF generation service.
 import { generateClientPDF } from './pdfService';
+// Import ErrorBoundary to catch unexpected rendering exceptions in the detail panel.
 import ErrorBoundary from './ErrorBoundary';
 
+// Backend API URL: reads from Vite environment variable (production) or falls back to port 5000 (development).
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+// Prism code styling overrides.
 const prismStyle = {
   'code[class*="language-"]': { color: '#e0e0e0' },
   'pre[class*="language-"]': { background: '#0a0c10' },
@@ -21,7 +45,13 @@ const prismStyle = {
   'string': { color: '#032f62' }
 };
 
-// --- TYPES ---
+// ----------------------------------------------------------------------------
+// DATA MODELS / TYPES
+// ----------------------------------------------------------------------------
+
+// Interface representing a single analysis run on the frontend.
+// WHAT: Reflects the schema of AnalysisRecord from the backend, with frontend progress tracking fields.
+// WHY: Ensures strict TypeScript type safety across UI state and API responses.
 interface AnalysisRun {
   id: string;
   repo_url: string;
@@ -37,7 +67,14 @@ interface AnalysisRun {
   progressDetails?: string;
 }
 
-// --- LOGIC UTILITIES ---
+// ----------------------------------------------------------------------------
+// LOGIC UTILITIES
+// ----------------------------------------------------------------------------
+
+// Generates or retrieves a unique client ID stored in localStorage.
+// WHAT: Creates a random UUID-like string prefixed with 'cli-'.
+// WHY: Isolates analysis history per browser without forcing users to sign up or log in.
+// HOW: Stored in browser localStorage under key 'ai-qa-client-id'.
 const getClientId = (): string => {
   let id = localStorage.getItem('ai-qa-client-id');
   if (!id) {
@@ -47,12 +84,17 @@ const getClientId = (): string => {
   return id;
 };
 
-// Highly Intelligent Autonomous Naming System
+// Autonomous Report Naming System.
+// WHAT: Inspects the AI markdown output to derive a smart, human-readable title for the report.
+// WHY: Instead of displaying raw timestamps or IDs, displays meaningful titles like "SQL Injection Vulnerability".
+// HOW: Uses regex matching against markdown headers or falls back to repository name.
 const getReportTitle = (run: AnalysisRun): string => {
   if (run.repo_url === 'Code Snippet Debugging') {
     if (run.playwright_output) {
+      // Look for error type header in snippet diagnostics.
       const errorTypeMatch = run.playwright_output.match(/\*\*Error Type\*\*:\s*(.+)/i);
       if (errorTypeMatch && errorTypeMatch[1]) return errorTypeMatch[1].trim().replace(/\*|_|#/g, '');
+      // Look for section 1 title.
       const correctedSolutionMatch = run.playwright_output.match(/###\s*1\.\s*(.+)/i);
       if (correctedSolutionMatch && correctedSolutionMatch[1]) return correctedSolutionMatch[1].trim().replace(/[📋🔍💡🖥️✅⚙️*]/g, '').trim();
     }
@@ -60,6 +102,7 @@ const getReportTitle = (run: AnalysisRun): string => {
   }
 
   if (run.playwright_output) {
+    // Extract key bug names or executive summary lines.
     const bugMatch = run.playwright_output.match(/###\s*(?:Corrected Solution|Security Audit|Diagnostic Results|Error Identification):\s*(.+)/i)
       || run.playwright_output.match(/###\s*1\.\s*Executive Summary\n+([^.#\n]+)/i);
       
@@ -68,6 +111,7 @@ const getReportTitle = (run: AnalysisRun): string => {
       if (parsed.length > 5 && parsed.length < 35) return parsed;
     }
 
+    // Keyword heuristics for common issues.
     const text = run.playwright_output.toLowerCase();
     if (text.includes('race condition')) return 'Async Race Condition';
     if (text.includes('jwt') || text.includes('token')) return 'JWT Authentication Issue';
@@ -81,6 +125,7 @@ const getReportTitle = (run: AnalysisRun): string => {
   }
 
   if (run.repo_url) {
+    // Derive name from last part of the GitHub URL.
     const parts = run.repo_url.replace(/\.git$/, '').split('/');
     const lastPart = parts[parts.length - 1];
     if (lastPart && lastPart !== 'Code Snippet Debugging') {
@@ -92,11 +137,15 @@ const getReportTitle = (run: AnalysisRun): string => {
   return 'Smart Quality Audit';
 };
 
+// Parses quantitative metrics from the analysis output for display in cards.
+// WHAT: Extracts Playwright test execution stats (passed/failed/skipped) or snippet error details.
+// WHY: Summarizes complex output into prominent metric cards at the top of the report.
 const parseAnalysisMetrics = (run: AnalysisRun) => {
   if (!run.playwright_output) return null;
 
   if (run.repo_url !== 'Code Snippet Debugging') {
     try {
+      // Look for Playwright JSON execution results embedded in section 5.
       const jsonMatch = run.playwright_output.match(/### 🖥️ 5\. Execution Results\n+```json\n([\s\S]*?)```/i);
       if (jsonMatch && jsonMatch[1]) {
         const data = JSON.parse(jsonMatch[1].trim());
@@ -117,13 +166,19 @@ const parseAnalysisMetrics = (run: AnalysisRun) => {
     return { type: 'playwright', total: 0, passed: 0, failed: 0, skipped: 0, duration: run.total_duration?.toFixed(1) || '0', framework: run.framework_signature || 'Detecting...', executionLog: "" };
   }
 
+  // Snippet error metrics extraction.
   const output = run.playwright_output;
   const errorType = output.match(/\*\*Error Type\*\*:\s*(.+)/i)?.[1]?.trim() || 'Analysis Complete';
   const errorLine = output.match(/\*\*Line Number\*\*:\s*(.+)/i)?.[1]?.trim() || 'N/A';
   return { type: 'snippet', errorType, errorLine, hasFix: output.includes('### 🚀 3.') };
 };
 
+// ----------------------------------------------------------------------------
+// MAIN DASHBOARD COMPONENT
+// ----------------------------------------------------------------------------
+
 export default function App() {
+  // Track which code snippet was recently copied to show temporary checkmark.
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -131,13 +186,18 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Active mode toggle: 'snippet' for file debugging, 'github' for repository analysis.
   const [activeMode, setActiveMode] = useState<'github' | 'snippet'>('snippet');
+  // Form input states for GitHub analysis.
   const [repoUrl, setRepoUrl] = useState('');
   const [focusArea, setFocusArea] = useState('');
   const [framework, setFramework] = useState<'playwright' | 'cypress' | 'jest'>('playwright');
+  // Selected file state for snippet diagnostics.
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // Loading state during API initiation.
   const [loading, setLoading] = useState(false);
   
+  // Local history vault: initialized from localStorage to provide instant offline history.
   const [runs, setRuns] = useState<AnalysisRun[]>(() => {
     try {
       const localVaultRaw = localStorage.getItem('ai-qa-local-vault');
@@ -147,21 +207,35 @@ export default function App() {
     }
   });
   
+  // ID of the currently selected analysis run displayed in the main panel.
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  // Authenticated GitHub user profile.
   const [user, setUser] = useState<any>(null);
+  // List of repositories fetched from the user's GitHub account.
   const [repos, setRepos] = useState<any[]>([]);
+  // Currently selected repository from the user dropdown.
   const [selectedRepo, setSelectedRepo] = useState<string>('');
   
+  // PDF export loading state.
   const [isExporting, setIsExporting] = useState(false);
+  // Pricing/Upgrade modal visibility state.
   const [showPricing, setShowPricing] = useState(false);
+  // Reference to hidden HTML file input element.
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // GitHub Personal Access Token state (persisted in localStorage).
   const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
   useEffect(() => { localStorage.setItem('ai-qa-github-token', githubToken); }, [githubToken]);
 
+  // Memoized lookup for the active analysis item object.
   const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
+  // Memoized parsed metrics for the active item.
   const metrics = useMemo(() => activeItem ? parseAnalysisMetrics(activeItem) : null, [activeItem]);
 
+  // --------------------------------------------------------------------------
+  // HISTORY FETCHING & LOCAL VAULT SYNCHRONIZATION
+  // --------------------------------------------------------------------------
+  // Fetches analysis history from backend and synchronizes with local storage vault.
   const fetchHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/analyses?clientId=${getClientId()}`);
@@ -175,6 +249,7 @@ export default function App() {
         localVault = [];
       }
       
+      // Update completed or failed runs in the local vault.
       serverRuns.forEach(serverRun => {
         if (serverRun.status === 'COMPLETED' || serverRun.status === 'FAILED') {
           const index = localVault.findIndex(v => v.id === serverRun.id);
@@ -182,15 +257,18 @@ export default function App() {
           else localVault.unshift(serverRun);
         }
       });
+      // Cap local vault to the 50 most recent items to conserve browser storage.
       if (localVault.length > 50) localVault = localVault.slice(0, 50);
       localStorage.setItem('ai-qa-local-vault', JSON.stringify(localVault));
 
+      // Merge running server jobs with stored vault history.
       const mergedRuns = [...serverRuns.filter(s => s.status !== 'COMPLETED' && s.status !== 'FAILED')];
       localVault.forEach(vaultRun => {
         if (!mergedRuns.find(m => m.id === vaultRun.id)) mergedRuns.push(vaultRun);
       });
       mergedRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       
+      // Avoid re-renders if data has not changed.
       setRuns(prev => {
         const isSame = prev.length === mergedRuns.length && prev.every((item, i) => 
           item.id === mergedRuns[i].id && item.status === mergedRuns[i].status && item.playwright_output === mergedRuns[i].playwright_output
@@ -200,16 +278,25 @@ export default function App() {
     } catch (e) { console.error("History fetch error:", e); }
   }, []);
 
+  // Fetch history on initial component mount.
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
-  // Robust SSE Subscription for Active Runs (Completely replaces polling loop)
+  // --------------------------------------------------------------------------
+  // SERVER-SENT EVENTS (SSE) STREAMING SUBSCRIPTION
+  // --------------------------------------------------------------------------
+  // Subscribes to real-time progress events when an active analysis is selected.
+  // WHAT: Replaces inefficient HTTP polling loops with a persistent EventSource stream.
+  // WHY: Updates progress percentages (0% to 100%) and status messages with sub-second latency.
+  // HOW: Closes the stream automatically when status reaches 'COMPLETED' or 'FAILED'.
   useEffect(() => {
     if (!activeItemId) return;
     const item = runs.find(r => r.id === activeItemId);
     if (!item || item.status === 'COMPLETED' || item.status === 'FAILED') return;
 
+    // Connect to backend SSE endpoint.
     const eventSource = new EventSource(`${API_URL}/api/analyses/${activeItemId}/stream`);
     
+    // Process incoming SSE events from backend broadcastProgress().
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       setRuns(prev => prev.map(run => run.id === activeItemId ? { 
@@ -219,25 +306,30 @@ export default function App() {
         progressDetails: data.details
       } : run));
 
+      // Close stream once job completes.
       if (data.status === 'COMPLETED' || data.status === 'FAILED') {
         eventSource.close();
         setTimeout(fetchHistory, 1000);
       }
     };
 
+    // Close stream on error to prevent reconnection storms.
     eventSource.onerror = () => {
       eventSource.close();
     };
 
+    // Clean up event source when active item changes or component unmounts.
     return () => eventSource.close();
-  }, [activeItemId, fetchHistory]); // Bind on activeId change; fetchHistory is stable (useCallback)
+  }, [activeItemId, fetchHistory]);
 
+  // Check authenticated GitHub user on load.
   useEffect(() => {
     fetch(`${API_URL}/api/user`, { credentials: 'include' })
       .then(res => res.ok ? res.json() : null)
       .then(data => { setUser(data); if (data) fetchRepos(); });
   }, []);
 
+  // Fetch user's GitHub repositories if logged in.
   const fetchRepos = async () => {
     try {
       const res = await fetch(`${API_URL}/api/user/repos`, { credentials: 'include' });
@@ -245,6 +337,7 @@ export default function App() {
     } catch (err) { console.error("Failed to fetch repos:", err); }
   };
 
+  // Trigger client-side PDF export.
   const handleExportPDF = async () => {
     const element = document.getElementById('report-container');
     if (!element || isExporting || !activeItem) return;
@@ -254,12 +347,16 @@ export default function App() {
     finally { setIsExporting(false); }
   };
 
+  // --------------------------------------------------------------------------
+  // SUBMIT HANDLER (START ANALYSIS OR SNIPPET DIAGNOSTIC)
+  // --------------------------------------------------------------------------
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
       if (activeMode === 'github') {
+        // Submit repository analysis request.
         const res = await fetch(`${API_URL}/api/analyze`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -274,6 +371,7 @@ export default function App() {
         }
         setRepoUrl(''); setFocusArea('');
       } else {
+        // Submit code snippet diagnostic request.
         if (!selectedFile) return;
         const code = await selectedFile.text();
         const res = await fetch(`${API_URL}/api/analyze-snippet`, {
@@ -293,6 +391,7 @@ export default function App() {
     finally { setLoading(false); }
   };
 
+  // Cancel an in-flight analysis job.
   const cancelAnalysis = async (runId: string) => {
     try {
       await fetch(`${API_URL}/api/analyses/${runId}/cancel`, { method: 'POST' });
@@ -302,6 +401,7 @@ export default function App() {
     }
   };
 
+  // Empty state welcome illustration when no item is selected.
   const renderWelcomeDashboard = () => (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full flex flex-col items-center justify-center p-6 text-center max-w-lg mx-auto my-auto gap-6">
       <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/10 to-indigo-500/10 flex items-center justify-center border border-cyan-500/15 relative shadow-2xl">
@@ -315,15 +415,21 @@ export default function App() {
     </motion.div>
   );
 
+  // --------------------------------------------------------------------------
+  // DASHBOARD JSX RENDER
+  // --------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-200 flex overflow-hidden font-sans text-[12px]">
+      {/* Sidebar Navigation */}
       <aside className="w-[200px] bg-[#0c111d] border-r border-white/5 flex flex-col p-2 hidden md:flex shrink-0 z-10 shadow-2xl">
+        {/* Brand Header */}
         <div className="flex items-center gap-1.5 mb-4 px-1 mt-1">
           <div className="w-6 h-6 rounded-md bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center shadow-md">
             <Bot size={13} color="white" strokeWidth={2.5} />
           </div>
           <h1 className="font-bold text-[13px] tracking-tight text-white leading-tight">AI QA Agent</h1>
         </div>
+        {/* Mode Navigation Buttons */}
         <nav className="flex flex-col gap-0.5 flex-1">
           <button
             onClick={() => { setActiveMode('snippet'); setActiveItemId(null); }}
@@ -338,6 +444,7 @@ export default function App() {
             <Globe size={12} /> Repository Engine
           </button>
         </nav>
+        {/* Founder Edition Upgrade Banner */}
         <div className="mt-auto pt-4 border-t border-white/5 space-y-4">
           <button onClick={() => setShowPricing(true)} className="w-full bg-gradient-to-br from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 border border-amber-500/30 p-3 rounded-xl transition-all group text-left relative overflow-hidden">
             <div className="flex items-center gap-1.5 mb-1"><span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Founder Edition</span><Zap size={8} className="text-amber-500 fill-amber-500 animate-pulse" /></div>
@@ -346,7 +453,9 @@ export default function App() {
         </div>
       </aside>
 
+      {/* Main Workspace Area */}
       <main className="flex-1 p-4 flex flex-col gap-4 h-screen overflow-y-auto">
+        {/* Dashboard Header with User Profile / Login */}
         <header className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-extrabold text-white tracking-tight">{activeMode === 'github' ? 'Autonomous QA Platform' : 'Code Diagnostic Engine'}</h2>
@@ -369,10 +478,12 @@ export default function App() {
           </div>
         </header>
 
+        {/* Input Form Section (GitHub URL input or File Drag & Drop) */}
         <section className="bg-white/5 rounded-xl p-4 border border-white/10 shadow-2xl backdrop-blur-sm z-20">
           <form onSubmit={handleStart} className="flex flex-col gap-3">
             {activeMode === 'github' ? (
               <div className="flex flex-col gap-3">
+                {/* Repository Dropdown for Authenticated GitHub Users */}
                 {user && repos.length > 0 && (
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none"><FileCode size={14} className="text-slate-500" /></div>
@@ -383,6 +494,7 @@ export default function App() {
                   </div>
                 )}
                 
+                {/* Manual GitHub URL Input Field */}
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
@@ -395,6 +507,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
+              /* Drag-and-drop File Upload for Snippets */
               <div className="flex flex-col gap-3 relative">
                 <div onClick={() => !loading && fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 transition-all group ${loading ? 'border-cyan-500/50 bg-cyan-500/5 cursor-wait' : 'border-white/10 cursor-pointer hover:bg-white/5 hover:border-white/20'}`}>
                   <input type="file" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && setSelectedFile(e.target.files[0])} className="hidden" />
@@ -417,12 +530,15 @@ export default function App() {
 
         {activeMode === 'snippet' && <div className="h-10 shrink-0" />}
 
+        {/* Audit History List & Detail Panel Layout */}
         <section className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 relative z-10">
+          {/* Left History Sidebar */}
           <div className="w-[240px] flex flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar shrink-0">
             <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Audit History</h3>
             
             <AnimatePresence>
               {(() => {
+                // Filter history based on whether we are in Snippet or GitHub mode.
                 const filteredRuns = runs.filter(run => activeMode === 'snippet' ? run.repo_url === 'Code Snippet Debugging' : run.repo_url !== 'Code Snippet Debugging');
                 const groups: { [key: string]: AnalysisRun[] } = {};
                 filteredRuns.forEach(run => {
@@ -453,6 +569,7 @@ export default function App() {
                             
                             <div className="flex justify-between items-start w-full gap-2 relative z-10">
                               <span className="text-[10.5px] text-white font-bold truncate max-w-[85%] group-hover/item:text-cyan-400 transition-colors" title={title}>{title}</span>
+                              {/* Delete button: removes from localStorage vault and server */}
                               <button onClick={(e) => { 
                                 e.stopPropagation();
                                 // Immediately remove from localStorage vault so it doesn't resurface after fetch
@@ -469,6 +586,7 @@ export default function App() {
                               }} className="text-slate-500 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-all shrink-0 p-1 rounded"><Trash2 size={12} /></button>
                             </div>
                             
+                            {/* Status badge and framework signature */}
                             <div className="flex items-center justify-between w-full mt-1 relative z-10">
                               <div className={`text-[8px] uppercase font-black px-2 py-0.5 rounded-full border self-start flex items-center gap-1.5 ${
                                 run.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
@@ -481,6 +599,7 @@ export default function App() {
                               {run.framework_signature && <span className="text-[8px] text-slate-500 font-bold tracking-tight">{run.framework_signature}</span>}
                             </div>
 
+                            {/* Real-time mini progress bar */}
                             {isRunning && run.progressPercent !== undefined && (
                               <div className="w-full bg-black/50 rounded-full h-1 mt-1 overflow-hidden relative z-10 border border-white/5">
                                 <motion.div className="bg-gradient-to-r from-cyan-500 to-indigo-500 h-1" initial={{ width: 0 }} animate={{ width: `${run.progressPercent}%` }} transition={{ duration: 0.5 }} />
@@ -496,6 +615,7 @@ export default function App() {
             </AnimatePresence>
           </div>
 
+          {/* Right Detail Panel */}
           <div className="flex-1 glass-panel border border-white/10 rounded-2xl p-6 overflow-y-auto relative flex flex-col min-h-0 shadow-2xl bg-[#0e1420]/80">
             <ErrorBoundary fallback={
               <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4">
@@ -526,6 +646,7 @@ export default function App() {
                       <p className="text-[10px] text-slate-500 font-medium text-center h-4">{activeItem.progressDetails || 'Running static analysis and fetching contexts...'}</p>
                     </div>
                     
+                    {/* Instant Cancellation Action Button */}
                     <button onClick={() => cancelAnalysis(activeItem.id)} className="mt-8 flex items-center gap-2 text-[10px] font-black text-rose-500 uppercase tracking-widest px-5 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all active:scale-95 shadow-lg">
                       <XCircle size={14} /> Cancel Execution
                     </button>
@@ -547,7 +668,7 @@ export default function App() {
                   </motion.div>
                 )}
 
-                {/* SUCCESS REPORT RENDERING (Stays visible underneath skeletons if updating) */}
+                {/* SUCCESS REPORT RENDERING */}
                 <motion.div className={`flex flex-col gap-4 ${activeItem.status !== 'COMPLETED' ? 'opacity-20 pointer-events-none' : 'opacity-100'}`} id="report-container" initial={{ opacity: 0, y: 20 }} animate={{ opacity: activeItem.status !== 'COMPLETED' ? 0.2 : 1, y: 0 }}>
                   <header className="flex items-center justify-between border-b border-white/5 pb-3">
                     <div className="flex items-center gap-2.5">
@@ -603,7 +724,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Prose Report Rendering */}
+                  {/* Markdown Prose Report Rendering with Custom Code Blocks */}
                   {activeItem.playwright_output && (
                     <div className="prose-report custom-scrollbar text-[13px] py-4">
                       <ReactMarkdown
@@ -653,6 +774,7 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Playwright Verification Suite Code Section */}
                   {activeItem.test_code && (
                     <div className="mt-8 border-t border-white/5 pt-8">
                       <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full" /> Playwright Verification Suite</h4>
@@ -668,6 +790,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* Pricing / Upgrade Modal */}
         {showPricing && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl w-full bg-[#0c111d] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex">
@@ -697,6 +820,9 @@ export default function App() {
   );
 }
 
+// ----------------------------------------------------------------------------
+// SYNTAX HIGHLIGHTER CODE THEME
+// ----------------------------------------------------------------------------
 const codeTheme = {
   'comment': { color: '#6a737d', fontStyle: 'italic' },
   'keyword': { color: '#ff7b72', fontWeight: 'bold' },

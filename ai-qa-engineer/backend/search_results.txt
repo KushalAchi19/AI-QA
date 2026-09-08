@@ -1,0 +1,40 @@
+Line 28:   status: 'STARTED' | 'GENERATING_TESTS' | 'TESTS_GENERATED' | 'RUNNING_TESTS' | 'COMPLETED' | 'FAILED' | 'ANALYSING';
+
+Line 123:   return { type: 'snippet', errorType, errorLine, hasFix: output.includes('### 🚀 3.') };
+
+Line 134:   const [activeMode, setActiveMode] = useState<'github' | 'snippet'>('snippet');
+
+Line 211:     const eventSource = new EventSource(`${API_URL}/api/analyses/${activeItemId}/stream`);
+
+Line 279:         const res = await fetch(`${API_URL}/api/analyze-snippet`, {
+
+Line 287:           setRuns(prev => [{ id: data.analysisId, repo_url: 'Code Snippet Debugging', status: 'ANALYSING', created_at: new Date().toISOString() }, ...prev]);
+
+Line 307:       <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500/10 to-indigo-500/10 flex items-center justify-center border border-cyan-500/15 relative shadow-2xl">
+
+Line 313:         <p className="text-[10px] text-slate-400 leading-relaxed max-w-sm mx-auto">Upload a local file snippet or select a Github repository workspace to start our autonomous auditing agents.</p>
+
+Line 329:             onClick={() => { setActiveMode('snippet'); setActiveItemId(null); }}
+
+Line 330:             className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md font-semibold text-[11px] transition-all ${activeMode === 'snippet' ? 'bg-indigo-500/10 text-indigo-400 ring-1 ring-indigo-500/30 shadow-lg' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
+
+Line 353:             <p className="text-[11px] text-slate-400 font-medium">{activeMode === 'github' ? 'Fast, parallelized test generation and code diagnostics.' : 'Analyze snippets for logic bugs and edge cases.'}</p>
+
+Line 418:         {activeMode === 'snippet' && <div className="h-10 shrink-0" />}
+
+Line 426:                 const filteredRuns = runs.filter(run => activeMode === 'snippet' ? run.repo_url === 'Code Snippet Debugging' : run.repo_url !== 'Code Snippet Debugging');
+
+Line 521:                         <span className="text-xs font-bold text-white">{activeItem.progressPercent || 15}%</span>
+
+Line 524:                         <motion.div className="bg-gradient-to-r from-cyan-400 via-indigo-500 to-cyan-400 h-2 bg-[length:200%_100%] animate-[gradient_2s_linear_infinite]" initial={{ width: '0%' }} animate={{ width: `${activeItem.progressPercent || 15}%` }} transition={{ duration: 0.5, ease: "easeOut" }} />
+
+Line 538:                     <AlertCircle size={48} className="text-rose-500 mb-6 drop-shadow-[0_0_15px_rgba(244,63,94,0.4)]" />
+
+Line 572:                       {metrics.type === 'snippet' ? (
+
+Line 611:                           h1: ({ children }) => <h1 className="text-[15px] font-black text-white uppercase mt-4 mb-3 pb-2 border-b border-white/5 tracking-wider">{children}</h1>,
+
+Line 618:                                   <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+
+Line 621:                                   <span className="text-[14px] font-black text-emerald-400 uppercase tracking-[0.15em]">{children}</span>
+

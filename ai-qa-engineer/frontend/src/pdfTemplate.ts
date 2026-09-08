@@ -1,34 +1,61 @@
+// ============================================================================
+// SERVICE: PDF HTML TEMPLATE GENERATOR (pdfTemplate.ts)
+// This file generates a clean, high-resolution HTML document specifically
+// styled for PDF report compilation. It extracts diagnostic findings,
+// formats key metrics into cards, cleans prose report text, highlights
+// code blocks, and applies dedicated CSS print stylesheets (@page rules)
+// for clean pagination when exporting audit reports.
+// ============================================================================
+
+/**
+ * Generates high-definition HTML string for PDF report generation.
+ * WHAT: Assembles report title, metrics cards, markdown prose, Playwright test code,
+ *       and CI/CD YAML into a complete HTML5 document with dedicated print CSS.
+ * WHY: Browsers and html2canvas require clean, self-contained HTML with exact styles
+ *       to render sharp, professional A4 PDF documents.
+ * HOW: Consumed by PDF rendering services to create downloadable audit reports.
+ */
 export const generatePremiumPDFHtml = (
   run: any, 
   metrics: any, 
   cloneHtml: string
 ) => {
+  // Format current timestamp for the report header.
   const date = new Date().toLocaleString();
+  // Determine report title based on whether it was a single snippet or full repository audit.
   const title = run.repo_url === 'Code Snippet Debugging' ? 'Snippet Diagnostic Report' : 'Repository Audit Report';
   
-  // Extract just the markdown prose content from the clone
+  // Extract just the markdown prose content from the cloned report DOM.
+  // WHAT: Uses DOMParser to safely parse raw HTML into a temporary document object.
+  // WHY: Allows us to programmatically query and clean up report elements before printing.
   const parser = new DOMParser();
   const doc = parser.parseFromString(cloneHtml, 'text/html');
   const proseElement = doc.querySelector('.prose-report-classic');
   let proseHtml = proseElement ? proseElement.innerHTML : '';
 
-  // Clean up any stray buttons and strip syntax highlighting spans to reduce payload size
+  // Clean up any stray buttons and strip syntax highlighting spans to reduce payload size.
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = proseHtml;
+  // Remove interactive UI buttons (e.g. "Copy Code") which make no sense in a printed PDF.
   tempDiv.querySelectorAll('button').forEach(b => b.remove());
   
-  // Remove all nested HTML inside code blocks to ensure perfect readability and zero bloat
+  // Remove all nested HTML inside code blocks to ensure perfect readability and zero bloat.
   tempDiv.querySelectorAll('pre').forEach(pre => {
-    // Preserve the raw text content only
+    // Preserve the raw text content only and escape angle brackets for safety.
     const rawText = pre.textContent || '';
     pre.innerHTML = `<code>${rawText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>`;
   });
   
+  // Extract the cleaned inner HTML for inclusion in the final template.
   proseHtml = tempDiv.innerHTML;
 
+  // --------------------------------------------------------------------------
+  // METRICS CARDS SECTION
+  // --------------------------------------------------------------------------
   let metricsHtml = '';
   if (metrics) {
     if (metrics.type === 'snippet') {
+      // Metric layout for Code Snippet diagnostics: Error Type, Line Number, Result.
       metricsHtml = `
         <div class="metrics-grid">
           <div class="metric-card metric-error">
@@ -46,6 +73,7 @@ export const generatePremiumPDFHtml = (
         </div>
       `;
     } else {
+      // Metric layout for Repository audits: Execution Time, Tech Stack Signature, Status.
       metricsHtml = `
         <div class="metrics-grid">
           <div class="metric-card metric-info">
@@ -65,8 +93,12 @@ export const generatePremiumPDFHtml = (
     }
   }
 
+  // --------------------------------------------------------------------------
+  // GENERATED CODE BLOCKS (PLAYWRIGHT & CI/CD)
+  // --------------------------------------------------------------------------
   let testCodeHtml = '';
   if (run.test_code) {
+    // Escape code text and format inside a styled pre/code container.
     testCodeHtml = `
       <div class="report-content playwright-block">
         <h2>Playwright Test Suite</h2>
@@ -77,6 +109,7 @@ export const generatePremiumPDFHtml = (
 
   let cicdCodeHtml = '';
   if (run.cicd_code) {
+    // Escape CI/CD YAML configuration and format inside a styled pre/code container.
     cicdCodeHtml = `
       <div class="report-content playwright-block">
         <h2>CI/CD Pipeline Configuration</h2>
@@ -85,6 +118,9 @@ export const generatePremiumPDFHtml = (
     `;
   }
 
+  // --------------------------------------------------------------------------
+  // ASSEMBLE FULL HTML DOCUMENT WITH EMBEDDED PRINT STYLES
+  // --------------------------------------------------------------------------
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -106,6 +142,7 @@ export const generatePremiumPDFHtml = (
           --info: #3b82f6;    /* Blue */
         }
 
+        /* Dedicated print page margins and numbering */
         @page {
           margin: 15mm;
           @bottom-right {
@@ -132,13 +169,13 @@ export const generatePremiumPDFHtml = (
           print-color-adjust: exact;
         }
 
-        /* Prevent page breaks inside cards and code blocks */
+        /* Prevent ugly page breaks inside cards and code blocks */
         .metric-card, pre, h2, h3, .card-section {
           page-break-inside: avoid;
           break-inside: avoid;
         }
 
-        /* HEADER */
+        /* HEADER STYLING */
         .pdf-header {
           border-bottom: 2px solid var(--primary);
           padding-bottom: 16px;
@@ -163,7 +200,7 @@ export const generatePremiumPDFHtml = (
           font-weight: 600;
         }
 
-        /* METRICS GRID */
+        /* METRICS GRID STYLING */
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
@@ -198,7 +235,7 @@ export const generatePremiumPDFHtml = (
         .metric-info { border-left: 4px solid var(--info); }
         .metric-info .value { color: var(--info); }
 
-        /* CONTENT STYLING */
+        /* REPORT PROSE CONTENT STYLING */
         .report-content {
           background: var(--card-bg);
           border: 1px solid var(--border-color);
@@ -226,7 +263,7 @@ export const generatePremiumPDFHtml = (
           gap: 8px;
         }
         
-        /* Remove the dark-mode specific spans from H3s that were cloned */
+        /* Normalize spans from cloned dark mode elements */
         .report-content h3 span {
           color: inherit !important;
           background: none !important;
@@ -238,7 +275,7 @@ export const generatePremiumPDFHtml = (
           height: auto !important;
         }
         
-        /* Special handling for "Corrected Solution" */
+        /* Highlight styling for "Corrected Solution" */
         .report-content div.flex.items-center.gap-2 {
           display: flex;
           align-items: center;
@@ -286,10 +323,10 @@ export const generatePremiumPDFHtml = (
           font-size: 11px;
         }
 
-        /* CODE BLOCKS - PREMIUM DARK THEME */
+        /* HIGH-CONTRAST CODE BLOCKS */
         .report-content pre, .playwright-block pre {
-          background: #0f172a !important; /* Slightly lighter/bluer dark */
-          color: #f8fafc !important; /* Near white for maximum contrast */
+          background: #0f172a !important;
+          color: #f8fafc !important;
           padding: 24px;
           border-radius: 12px;
           font-family: 'JetBrains Mono', monospace;
@@ -303,7 +340,7 @@ export const generatePremiumPDFHtml = (
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         
-        /* Force all children inside pre to be transparent and readable */
+        /* Enforce transparency inside pre elements */
         .report-content pre *, .playwright-block pre * {
           background: transparent !important;
           color: inherit !important;
@@ -314,7 +351,7 @@ export const generatePremiumPDFHtml = (
 
         .report-content code {
           background: #f1f5f9;
-          color: #e11d48; /* rose-600 */
+          color: #e11d48;
           padding: 2px 5px;
           border-radius: 4px;
           font-family: 'JetBrains Mono', monospace;
@@ -329,7 +366,6 @@ export const generatePremiumPDFHtml = (
           font-size: inherit !important;
         }
         
-        /* Remove the custom UI elements around code blocks from the clone */
         .rounded-xl.overflow-hidden.my-6 {
           border: none !important;
           background: none !important;
@@ -337,7 +373,7 @@ export const generatePremiumPDFHtml = (
           margin: 0 !important;
         }
         .px-5.py-3\\.5.flex {
-          display: none !important; /* Hide the top bar of code blocks */
+          display: none !important;
         }
 
         /* FOOTER */
@@ -356,6 +392,7 @@ export const generatePremiumPDFHtml = (
       </style>
     </head>
     <body>
+      <!-- Report Header -->
       <div class="pdf-header">
         <h1>${title}</h1>
         <div class="meta">
@@ -364,16 +401,21 @@ export const generatePremiumPDFHtml = (
         </div>
       </div>
 
+      <!-- Key Metrics Section -->
       ${metricsHtml}
 
+      <!-- AI Prose Report Section -->
       <div class="report-content">
         ${proseHtml}
       </div>
 
+      <!-- Playwright Test Suite -->
       ${testCodeHtml}
       
+      <!-- GitHub Actions CI/CD Pipeline -->
       ${cicdCodeHtml}
 
+      <!-- Report Footer -->
       <div class="pdf-footer">
         <span>Generated by AI QA Engineer</span>
         <span>Premium Audit Report</span>

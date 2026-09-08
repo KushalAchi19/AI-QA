@@ -1,1 +1,39 @@
-{"analyses": []}
+{
+  "analyses": [
+    {
+      "id": "db91abc0-7625-4790-a4a0-5a035be5c909",
+      "client_id": "test-client-123",
+      "repo_url": "Code Snippet Debugging",
+      "status": "COMPLETED",
+      "created_at": "2026-07-27T06:45:58.441Z",
+      "test_file": "test.js",
+      "test_code": "function add(a,b) { return a+b; }",
+      "playwright_output": "### 1. Corrected Solution..."
+    },
+    {
+      "id": "6422d1f9-4691-49d7-b140-05c40d2cd9b0",
+      "client_id": "test-client-999",
+      "repo_url": "Code Snippet Debugging",
+      "status": "COMPLETED",
+      "created_at": "2026-07-27T06:55:44.075Z",
+      "test_file": "test.js",
+      "test_code": "function add(a,b) { return a+b; }",
+      "playwright_output": "### 1. Corrected Solution..."
+    },
+    {
+      "id": "676619dc-9c4b-42e7-80f5-798929beeee4",
+      "client_id": "test-client-999",
+      "repo_url": "https://github.com/octocat/Spoon-Knife",
+      "status": "Static Analysis",
+      "created_at": "2026-07-27T07:03:06.776Z"
+    },
+    {
+      "id": "935d3563-0b18-4bc7-b127-860cd5480c5a",
+      "client_id": "test-client-999",
+      "repo_url": "https://github.com/octocat/Spoon-Knife",
+      "status": "FAILED",
+      "created_at": "2026-07-27T07:04:02.338Z",
+      "playwright_output": "Analysis Failed: Failed to generate tests via AI: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent: [503 Service Unavailable] This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+    }
+  ]
+}

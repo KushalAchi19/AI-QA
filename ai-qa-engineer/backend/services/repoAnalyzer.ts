@@ -1,15 +1,43 @@
+// ============================================================================
+// SERVICE: REPOSITORY ANALYZER (CODEBASE SCANNING & STATIC ANALYSIS)
+// This service inspects, clones, and analyzes target repositories.
+// It handles:
+// 1. Fetching repository files via GitHub REST API (selective high-speed fetch).
+// 2. Ultra-shallow cloning (`git clone --depth 1`) with ZIP fallback.
+// 3. Static in-memory Skills Detection (`detectSkills`) for 20+ languages and frameworks.
+// 4. Determining whether a repository is headless (CLI/backend) or has a web UI.
+// 5. Intelligent Token-Budget Compression (`compressPromptContext`) to keep prompt sizes optimal for Gemini.
+// ============================================================================
+
+// Import exec from child_process to execute system shell commands (e.g. git clone).
 import { exec } from 'child_process';
+// Import util to convert callback-style exec into modern async/await Promise.
 import util from 'util';
+// Import path to resolve file paths across operating systems.
 import path from 'path';
+// Import synchronous fs for file checking.
 import fs from 'fs';
+// Import promise-based fs for non-blocking file reads and writes.
 import fsPromises from 'fs/promises';
+// Import axios to make HTTP requests to the GitHub REST API and download fallback ZIPs.
 import axios from 'axios';
 
+// Promisify exec for async/await usage.
 const execPromise = util.promisify(exec);
 
-// Maximum cumulative character size of file contents sent to AI
+// Maximum cumulative character size of file contents sent to Gemini AI (budget limit).
+// WHAT: Limits total prompt context characters to ~120,000 characters (~30k tokens).
+// WHY: Prevents token overflow, excessive API costs, and context dilution.
+// HOW: Used in `compressPromptContext()` to decide whether to send full content or structural summaries.
 const MAX_AI_CONTEXT_CHARS = 120000; 
 
+// ----------------------------------------------------------------------------
+// DATA MODELS / INTERFACES
+// ----------------------------------------------------------------------------
+
+// Interface representing a single scanned source file.
+// WHAT: Contains metadata, raw code content, size in bytes, priority, and category.
+// WHY: Allows the analyzer to prioritize and filter files before prompting the AI.
 export interface ScannedFile {
     name: string;
     content: string;
@@ -18,6 +46,9 @@ export interface ScannedFile {
     category: string;
 }
 
+// Interface representing the detected technology stack of the repository.
+// WHAT: Aggregates languages, frameworks, databases, DevOps tools, auth mechanisms, and testing libraries.
+// WHY: Injected into the Gemini prompt so tests match the actual stack without hallucinating dependencies.
 export interface SkillProfile {
     languages: string[];
     frameworks: string[];
@@ -30,12 +61,18 @@ export interface SkillProfile {
     allSkills: string[];  // flat deduplicated list injected into AI prompt
 }
 
+// ----------------------------------------------------------------------------
+// STATIC SKILLS DETECTION ENGINE
+// ----------------------------------------------------------------------------
+
 /**
- * Static Skills Detection Engine
- * Runs purely in-memory on already-fetched files — zero extra API calls, < 5ms.
- * Detects languages, frameworks, databases, devops tools, auth patterns, testing libs.
+ * Static Skills Detection Engine.
+ * WHAT: Runs purely in-memory on already-fetched files in under 5ms without extra network calls.
+ * WHY: Provides deterministic tech-stack detection to guide AI test generation.
+ * HOW: Analyzes file extensions, configuration files, package manifests, and code keywords.
  */
 export function detectSkills(files: ScannedFile[]): SkillProfile {
+    // Use Sets to automatically prevent duplicate entries.
     const languages = new Set<string>();
     const frameworks = new Set<string>();
     const databases = new Set<string>();
@@ -46,6 +83,7 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
     let packageManager = 'npm';
 
     // ── 1. Language detection from file extensions ────────────────────────────
+    // Mapping of common programming language file extensions to canonical names.
     const extLanguageMap: Record<string, string> = {
         ts: 'TypeScript', tsx: 'TypeScript',
         js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
@@ -78,7 +116,7 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
     for (const file of files) {
         const nameLower = file.name.toLowerCase();
 
-        // DevOps / Infrastructure
+        // DevOps / Infrastructure detection
         if (nameLower === 'dockerfile' || nameLower.includes('/dockerfile')) devops.add('Docker');
         if (nameLower.includes('docker-compose')) devops.add('Docker Compose');
         if (nameLower.includes('.github/workflows')) devops.add('GitHub Actions');
@@ -93,14 +131,14 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
         if (nameLower.includes('.travis.yml')) devops.add('Travis CI');
         if (nameLower.includes('jenkinsfile')) devops.add('Jenkins');
 
-        // Database / ORM config files
+        // Database / ORM config files detection
         if (nameLower.endsWith('.prisma') || nameLower.includes('prisma/schema')) databases.add('Prisma');
         if (nameLower.includes('drizzle.config')) databases.add('Drizzle ORM');
         if (nameLower.endsWith('knexfile.js') || nameLower.endsWith('knexfile.ts')) databases.add('Knex');
         if (nameLower.includes('alembic.ini') || nameLower.includes('migrations/')) { /* check content below */ }
         if (nameLower.includes('flyway') || nameLower.endsWith('flyway.conf')) databases.add('Flyway');
 
-        // Test config files
+        // Test configuration files detection
         if (nameLower.includes('playwright.config')) testing.add('Playwright');
         if (nameLower.includes('jest.config') || nameLower.includes('jest.setup')) testing.add('Jest');
         if (nameLower.includes('vitest.config')) testing.add('Vitest');
@@ -113,9 +151,10 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
         if (nameLower.endsWith('test.java') || nameLower.includes('junit')) testing.add('JUnit');
         if (nameLower.includes('phpunit')) testing.add('PHPUnit');
 
-        // ── 3. Package manifest parsing ──────────────────────────────────────
+        // ── 3. Package manifest parsing (Node.js) ─────────────────────────────
         if (nameLower === 'package.json') {
             try {
+                // Parse package.json to inspect dependencies and devDependencies.
                 const pkg = JSON.parse(file.content);
                 const allDeps: Record<string, string> = {
                     ...(pkg.dependencies || {}),
@@ -123,12 +162,13 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
                     ...(pkg.peerDependencies || {}),
                 };
 
-                // Package manager
+                // Identify package manager from config or lock files.
                 if (pkg.packageManager?.includes('yarn') || file.name.includes('yarn.lock')) packageManager = 'yarn';
                 else if (pkg.packageManager?.includes('pnpm') || files.some(f => f.name === 'pnpm-lock.yaml')) packageManager = 'pnpm';
                 else if (pkg.packageManager?.includes('bun') || files.some(f => f.name === 'bun.lockb')) packageManager = 'bun';
                 else packageManager = 'npm';
 
+                // Map of package names to categories and display labels.
                 const depMap: Array<[string[], 'frameworks' | 'databases' | 'auth' | 'testing' | 'patterns' | 'devops', string]> = [
                     // Frameworks / Runtime
                     [['react', 'react-dom'], 'frameworks', 'React'],
@@ -380,9 +420,15 @@ export function detectSkills(files: ScannedFile[]): SkillProfile {
     };
 }
 
+// ----------------------------------------------------------------------------
+// STACK-AWARE ROOT DISCOVERY
+// ----------------------------------------------------------------------------
+
 /**
  * Returns the additional API roots to fetch based on detected primary language.
- * Enables thorough scanning of non-JS repos on the first API pass.
+ * WHAT: Determines which directories (e.g. `app/controllers`, `src/main/java`) to scan via GitHub API.
+ * WHY: Non-JS repositories (Python, Java, Go, Ruby) store critical code outside `src/`.
+ * HOW: Used in Phase 2 of selective GitHub API fetching.
  */
 export function getStackAwareRoots(files: ScannedFile[]): string[] {
     const extensions = new Set(files.map(f => f.name.split('.').pop()?.toLowerCase() || ''));
@@ -390,36 +436,36 @@ export function getStackAwareRoots(files: ScannedFile[]): string[] {
 
     const roots: string[] = [];
 
-    // Python
+    // Python projects
     if (extensions.has('py') || names.has('requirements.txt') || names.has('pipfile')) {
         roots.push('requirements.txt', 'Pipfile', 'setup.py', 'pyproject.toml',
             'app.py', 'main.py', 'manage.py', 'wsgi.py', 'asgi.py',
             'app', 'api', 'core', 'models', 'views', 'urls', 'serializers', 'schemas', 'routers', 'tests');
     }
-    // Ruby
+    // Ruby projects
     if (extensions.has('rb') || names.has('gemfile')) {
         roots.push('Gemfile', 'Rakefile',
             'app/controllers', 'app/models', 'app/views', 'app/helpers',
             'config/routes.rb', 'config/database.yml', 'db/schema.rb',
             'spec', 'test', 'lib');
     }
-    // Go
+    // Go projects
     if (extensions.has('go') || names.has('go.mod')) {
         roots.push('go.mod', 'go.sum', 'main.go',
             'cmd', 'internal', 'pkg', 'api', 'handler', 'handlers',
             'middleware', 'model', 'models', 'repository', 'service', 'services', 'router');
     }
-    // Rust
+    // Rust projects
     if (extensions.has('rs') || names.has('cargo.toml')) {
         roots.push('Cargo.toml', 'src/main.rs', 'src/lib.rs', 'src', 'tests');
     }
-    // Java / Kotlin
+    // Java / Kotlin projects
     if (extensions.has('java') || extensions.has('kt') || names.has('pom.xml') || names.has('build.gradle')) {
         roots.push('pom.xml', 'build.gradle', 'build.gradle.kts',
             'src/main/java', 'src/main/kotlin', 'src/main/resources',
             'src/test/java', 'src/test/kotlin');
     }
-    // PHP
+    // PHP projects
     if (extensions.has('php') || names.has('composer.json')) {
         roots.push('composer.json', 'artisan', 'app', 'routes', 'config', 'database', 'tests');
     }
@@ -429,10 +475,15 @@ export function getStackAwareRoots(files: ScannedFile[]): string[] {
     return [...new Set(roots)]; // deduplicate
 }
 
+// ----------------------------------------------------------------------------
+// CORE REPOSITORY ANALYZER ORCHESTRATION
+// ----------------------------------------------------------------------------
+
 /**
- * Repository Analyzer
- * High-speed implementation that prioritizes selective API fetching and shallow cloning.
- * Integrates ZIP download fallbacks and smart prioritized token compression.
+ * Repository Analyzer.
+ * WHAT: Coordinates fetching, scanning, skills detection, headless UI detection, and token compression.
+ * WHY: Serves as the primary entry point for repository QA analysis.
+ * HOW: Called in `server.ts` (/api/analyze) and `worker-entry.ts`.
  */
 export async function analyzeRepository(
     repoUrl: string,
@@ -445,7 +496,7 @@ export async function analyzeRepository(
     };
 
     try {
-        // Sanitize URL: strip trailing slash and .git suffix before matching
+        // Sanitize URL: strip trailing slash and .git suffix before regex matching.
         const cleanUrl = repoUrl.trim().replace(/\.git$/, '').replace(/\/$/, '');
         const match = cleanUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
         if (!match) throw new Error("Invalid GitHub URL. Must be a valid github.com repository URL.");
@@ -456,6 +507,7 @@ export async function analyzeRepository(
         const cloneFolder = `site-${analysisId}`;
         const clonePath = path.join(testsDir, cloneFolder);
 
+        // Ensure output tests directory exists.
         if (!fs.existsSync(testsDir)) {
             await fsPromises.mkdir(testsDir, { recursive: true });
         }
@@ -466,7 +518,9 @@ export async function analyzeRepository(
         let files: ScannedFile[] = [];
         let fetchedViaApi = false;
 
-        // STRATEGY 1: Selective API Fetch (INSTANT fallback/bypass)
+        // --------------------------------------------------------------------
+        // STRATEGY 1: SELECTIVE REST API FETCH (INSTANT FALLBACK/BYPASS)
+        // --------------------------------------------------------------------
         try {
             console.log("Attempting high-speed selective API fetch...");
             files = await fetchKeyFilesViaAPI(owner, repoName, githubToken);
@@ -474,14 +528,13 @@ export async function analyzeRepository(
                 console.log(`✅ API Selective Fetch (Phase 1) successful (${files.length} files).`);
                 fetchedViaApi = true;
 
-                // PHASE 2: Stack-aware follow-up fetch for non-JS ecosystems
-                // Run detectSkills on Phase 1 files to identify the ecosystem
+                // PHASE 2: Stack-aware follow-up fetch for non-JS ecosystems.
                 const phase1Skills = detectSkills(files);
                 const stackRoots = getStackAwareRoots(files);
                 if (phase1Skills.languages.some(l => !['TypeScript','JavaScript'].includes(l))) {
                     console.log(`🔍 Phase 2 stack-aware fetch for ecosystem: ${phase1Skills.languages.join(', ')}`);
                     const phase2Files = await fetchKeyFilesViaAPI(owner, repoName, githubToken, stackRoots);
-                    // Merge — avoid duplicate paths
+                    // Merge — avoid duplicate paths.
                     const existingPaths = new Set(files.map(f => f.name));
                     for (const f of phase2Files) {
                         if (!existingPaths.has(f.name)) files.push(f);
@@ -489,7 +542,7 @@ export async function analyzeRepository(
                     console.log(`✅ Phase 2 added ${phase2Files.length} extra files (total: ${files.length}).`);
                 }
 
-                // Start background clone for environment execution later
+                // Start background clone for Playwright execution later.
                 startBackgroundClone(cleanUrl, clonePath, githubToken);
             } else {
                 console.log(`Notice: API Fetch returned too few files (${files.length}), falling back to clone.`);
@@ -499,12 +552,15 @@ export async function analyzeRepository(
             console.log(`Notice: API Fetch skipped/failed (${apiError.message}), using shallow clone...`);
         }
 
-        // STRATEGY 2: Ultra-Shallow Clone (Primary Local)
+        // --------------------------------------------------------------------
+        // STRATEGY 2: ULTRA-SHALLOW CLONE (PRIMARY LOCAL FALLBACK)
+        // --------------------------------------------------------------------
         if (!fetchedViaApi) {
             if (fs.existsSync(clonePath)) {
                 await fsPromises.rm(clonePath, { recursive: true, force: true });
             }
 
+            // Include GitHub token in URL if provided for private repo access.
             const authenticatedUrl = githubToken
                 ? cleanUrl.replace('https://', `https://${githubToken}@`)
                 : cleanUrl;
@@ -512,14 +568,14 @@ export async function analyzeRepository(
             notify("Fetching Repository (Cloning)", 20);
 
             try {
-                // Clone depth 1, single branch, filtering out blob bodies until read
+                // Clone depth 1, single branch, filtering out blob bodies until read.
                 await execPromise(
                     `git clone --depth 1 --single-branch --filter=blob:none "${authenticatedUrl}" "${clonePath}"`,
                     { timeout: 30000 }
                 );
                 console.log("✅ Ultra-shallow clone successful.");
             } catch (cloneError: any) {
-                // Redact token from error message before logging
+                // Redact token from error message before logging for security.
                 const safeMsg = (cloneError.message as string).replace(githubToken || 'NO_TOKEN_PLACEHOLDER', '***');
                 console.warn(`Shallow clone failed (${safeMsg}). Trying ZIP Fallback...`);
                 notify("Fetching Repository (ZIP Fallback)", 25);
@@ -527,7 +583,7 @@ export async function analyzeRepository(
             }
 
             notify("Filtering Files", 35);
-            // Scan directory and build prioritised map
+            // Scan directory and build prioritized file list.
             files = await scanAndCategorizeDirectory(clonePath, clonePath);
         }
 
@@ -537,11 +593,11 @@ export async function analyzeRepository(
 
         notify("Static Analysis", 50);
 
-        // Detect tech stack skills from scanned files (in-memory, < 5ms)
+        // Detect tech stack skills from scanned files (in-memory, < 5ms).
         const skillProfile = detectSkills(files);
         console.log(`✅ Skills detected: ${skillProfile.allSkills.join(', ') || 'none'}`);
         
-        // Check if there is a frontend interface dynamically
+        // Dynamically check whether a frontend UI exists.
         const isHeadless = !files.some(f => 
             f.name.endsWith('.html') || 
             f.name.endsWith('.jsx') || 
@@ -550,7 +606,7 @@ export async function analyzeRepository(
             f.name.endsWith('.svelte')
         );
 
-        // Apply dynamic token-budget priority sorting & prompt compression
+        // Apply dynamic token-budget priority sorting & prompt compression.
         const compressedFiles = compressPromptContext(files);
 
         notify("AI Deep Analysis", 65);
@@ -569,11 +625,17 @@ export async function analyzeRepository(
     }
 }
 
+// ----------------------------------------------------------------------------
+// REPOSITORY ZIP ARCHIVE FALLBACK DOWNLOADER
+// ----------------------------------------------------------------------------
+
 /**
  * Downloads the repository ZIP file as a fallback and extracts it.
+ * WHAT: Downloads repository archive from GitHub API and extracts via PowerShell (Win) or unzip (Linux).
+ * WHY: Acts as a safeguard when git CLI is unavailable, restricted, or failing.
  */
 async function downloadRepoZip(owner: string, repo: string, extractPath: string, githubToken?: string) {
-    // Attempt to determine the default branch first via API
+    // Attempt to determine default branch via API.
     let branch = 'main';
     try {
         const repoInfo = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
@@ -581,13 +643,13 @@ async function downloadRepoZip(owner: string, repo: string, extractPath: string,
         });
         branch = repoInfo.data.default_branch || 'main';
     } catch (e) {
-        // Fallback to main/master if API fails
+        // Fallback to standard branches if API lookup fails.
     }
 
     const branches = [...new Set([branch, 'main', 'master', 'develop', 'trunk'])];
     const tempZip = `${extractPath}.zip`;
 
-    // Ensure the folder directory exists
+    // Ensure extraction destination directory exists.
     await fsPromises.mkdir(extractPath, { recursive: true });
 
     let success = false;
@@ -614,7 +676,7 @@ async function downloadRepoZip(owner: string, repo: string, extractPath: string,
     if (!success) throw new Error("Could not download ZIP from any known default branch.");
 
     try {
-        // Extract ZIP using native platforms
+        // Extract ZIP using native platform utilities.
         if (process.platform === 'win32') {
             await execPromise(
                 `powershell -NoProfile -Command "Expand-Archive -Path '${tempZip}' -DestinationPath '${extractPath}' -Force"`,
@@ -624,10 +686,10 @@ async function downloadRepoZip(owner: string, repo: string, extractPath: string,
             await execPromise(`unzip -q "${tempZip}" -d "${extractPath}"`, { timeout: 60000 });
         }
 
-        // Clean up zip archive
+        // Clean up temporary zip archive.
         if (fs.existsSync(tempZip)) await fsPromises.unlink(tempZip);
 
-        // Flatten the top level zip folder if it exists
+        // Flatten the top-level zip folder created by GitHub's zipball format.
         const rootItems = await fsPromises.readdir(extractPath);
         if (rootItems.length === 1) {
             const nestedDir = path.join(extractPath, rootItems[0]);
@@ -649,8 +711,14 @@ async function downloadRepoZip(owner: string, repo: string, extractPath: string,
     }
 }
 
+// ----------------------------------------------------------------------------
+// ASYNCHRONOUS BACKGROUND CLONER
+// ----------------------------------------------------------------------------
+
 /**
- * Fast background cloner for verification step.
+ * Fast background cloner for Playwright verification step.
+ * WHAT: Spawns a background git clone while Gemini is already analyzing API-fetched files.
+ * WHY: Parallelizes code analysis and environment cloning to cut overall pipeline runtime in half.
  */
 function startBackgroundClone(repoUrl: string, clonePath: string, githubToken?: string) {
     if (fs.existsSync(clonePath)) return;
@@ -661,8 +729,14 @@ function startBackgroundClone(repoUrl: string, clonePath: string, githubToken?: 
     });
 }
 
+// ----------------------------------------------------------------------------
+// DIRECTORY SCANNING & RECURSIVE CATEGORIZATION
+// ----------------------------------------------------------------------------
+
 /**
  * Scan directory and categorize based on developers priority rules.
+ * WHAT: Recursively reads filesystem, skips binaries/ignored folders, assigns priority (HIGH/MEDIUM/LOW).
+ * WHY: Curates meaningful code for AI analysis without wasting tokens on images, lock files, or dependencies.
  */
 async function scanAndCategorizeDirectory(basePath: string, currentPath: string, depth = 0): Promise<ScannedFile[]> {
     const files: ScannedFile[] = [];
@@ -675,11 +749,11 @@ async function scanAndCategorizeDirectory(basePath: string, currentPath: string,
         return files; // Directory may have been removed mid-scan
     }
     
-    // Concurrently fetch stats to speed up scanning
+    // Concurrently fetch stats to speed up scanning.
     const results = await Promise.all(items.map(async (item) => {
         const fullPath = path.join(currentPath, item);
         
-        // Smart IGNORE checking
+        // Smart IGNORE checking (node_modules, .git, dist, etc.)
         if (isIgnoredPath(item)) return null;
 
         try {
@@ -723,9 +797,14 @@ async function scanAndCategorizeDirectory(basePath: string, currentPath: string,
     return files;
 }
 
+// ----------------------------------------------------------------------------
+// SELECTIVE GITHUB REST API FETCHER
+// ----------------------------------------------------------------------------
+
 /**
  * Optimized key files fetcher via GitHub REST API.
- * Accepts optional `customRoots` for stack-aware Phase 2 fetching (non-JS ecosystems).
+ * WHAT: Fetches package.json, source files, and configuration directly over HTTP without downloading the full git history.
+ * WHY: Provides instant (<2s) analysis start for public repositories.
  */
 async function fetchKeyFilesViaAPI(owner: string, repo: string, githubToken?: string, customRoots?: string[]): Promise<ScannedFile[]> {
     const criticalRoots = customRoots ?? ['package.json', 'tsconfig.json', 'src', 'app', 'middleware.ts', 'server.js', 'app.js'];
@@ -778,6 +857,10 @@ async function fetchKeyFilesViaAPI(owner: string, repo: string, githubToken?: st
     return files;
 }
 
+// ----------------------------------------------------------------------------
+// FILTERING & HEURISTIC HELPERS
+// ----------------------------------------------------------------------------
+
 /**
  * Checks if a path is in our ignore list.
  */
@@ -814,6 +897,7 @@ function isBinaryExtension(ext: string): boolean {
 
 /**
  * Dynamic File Prioritization Heuristic.
+ * Assigns 'HIGH' to auth, routes, schemas, and configurations.
  */
 function getFilePriority(filePath: string, ext: string): 'HIGH' | 'MEDIUM' | 'LOW' {
     const pathLower = filePath.toLowerCase();
@@ -851,9 +935,16 @@ function getFileCategory(ext: string): string {
     return 'other';
 }
 
+// ----------------------------------------------------------------------------
+// TOKEN-BUDGET PROMPT COMPRESSION
+// ----------------------------------------------------------------------------
+
 /**
  * Token-budget prompt compressor.
- * Guarantees context characters do not exceed MAX_AI_CONTEXT_CHARS by abstracting files.
+ * Guarantees context characters do not exceed MAX_AI_CONTEXT_CHARS by abstracting lower-priority files.
+ * WHAT: Sorts files by priority (HIGH > MEDIUM > LOW). Keeps full content of HIGH priority files
+ *       and within-budget files; abstracts remaining files to path/metadata summaries.
+ * WHY: Prevents token truncation errors while preserving full architectural visibility for Gemini.
  */
 export function compressPromptContext(files: ScannedFile[]): ScannedFile[] {
     // Sort: HIGH priority first, then MEDIUM, then LOW. Within that, smaller files first
