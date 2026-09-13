@@ -61,64 +61,83 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 /**
- * Resilient content generator featuring exponential backoff, strict timeout, and model fallback.
- * WHAT: Attempts generation with `primaryModel` (gemini-2.5-flash). If rate-limited (429),
- *       temporarily unavailable (503), or times out, it retries with exponential backoff before falling back
- *       to `fallbackModel` (gemini-2.5-flash-lite).
- * WHY: AI cloud APIs face burst traffic; retries and model fallbacks guarantee zero downtime.
+ * Resilient content generator featuring exponential backoff, configurable timeout, and model fallback.
+ * WHAT: Attempts generation with `primaryModel` (default: gemini-2.5-flash or env GEMINI_PRIMARY_MODEL).
+ *       If rate-limited (429) or service unavailable (503), it retries with exponential backoff.
+ *       If it times out or exhausts retries, it automatically falls back to `fallbackModel`
+ *       (default: gemini-1.5-flash or env GEMINI_FALLBACK_MODEL).
+ * WHY: AI cloud APIs face burst traffic, latency spikes, or temporary 503 capacity issues.
+ *      Automatic fallback to a high-speed, highly available model like Gemini 1.5 Flash ensures zero downtime.
  * HOW: Used by `generateTests`, `analyzeErrorSnippet`, and `fixFailedTest`.
  */
 export async function generateContentWithRetry(
     prompt: string, 
-    primaryModel = "gemini-2.5-flash", 
-    fallbackModel = "gemini-2.5-flash-lite", 
-    retries = 3, 
+    primaryModel = process.env.GEMINI_PRIMARY_MODEL || "gemini-1.5-flash", 
+    fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.0-flash", 
+    retries = 2, 
     initialDelay = 1000,
-    timeoutMs = 60000
+    timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || 120000
 ) {
     // Obtain authenticated SDK instance.
     const genAI = getGenAIInstance();
-    // Load the primary generative model (Gemini 2.5 Flash).
+    // Load the primary generative model.
     let model = genAI.getGenerativeModel({ model: primaryModel });
-    // Initialize the backoff delay in milliseconds.
     let delay = initialDelay;
+    let lastPrimaryError: any = null;
 
-    // Retry loop for transient failures.
+    // Retry loop for primary model
     for (let i = 0; i < retries; i++) {
         try {
-            // Attempt to generate text content using the configured prompt with strict timeout.
+            // Attempt to generate text content using the configured prompt with timeout.
             return await withTimeout(model.generateContent(prompt), timeoutMs, `Gemini API (${primaryModel})`);
         } catch (error: any) {
+            lastPrimaryError = error;
             const errorMsg = error.message || '';
-            // Check if error is transient: rate-limit (429), service unavailable (503), or timeout.
-            const isTransient = errorMsg.includes('503') || errorMsg.includes('429') || error.status === 503 || error.status === 429 || errorMsg.includes('timed out');
-            
-            // If retry limit not reached, wait with exponential backoff and retry primary model.
+            const isTimeout = errorMsg.includes('timed out');
+            const isTransient = errorMsg.includes('503') || errorMsg.includes('429') || error.status === 503 || error.status === 429;
+
+            // If primary model timed out, don't waste minutes retrying the same slow model.
+            // Immediately switch to the fast fallback model.
+            if (isTimeout) {
+                console.warn(`⚠️ Gemini API (${primaryModel}) timed out after ${timeoutMs / 1000}s. Switching to fallback model (${fallbackModel})...`);
+                break;
+            }
+
+            // If retry limit not reached for 429 / 503 transient errors, back off and retry.
             if (isTransient && i < retries - 1) {
                 console.warn(`⚠️ Gemini API (${primaryModel}) failed (${errorMsg}). Retrying in ${delay}ms... (Attempt ${i + 1}/${retries})`);
-                // Asynchronously sleep for the backoff duration.
                 await new Promise(res => setTimeout(res, delay));
-                // Double the delay for the next iteration (exponential backoff).
                 delay *= 2;
                 continue;
             }
-            
-            // If primary model retries are exhausted, switch to the fallback model.
-            if (isTransient && fallbackModel) {
-                console.warn(`⚠️ Gemini API (${primaryModel}) exhausted retries. Falling back to ${fallbackModel}...`);
-                try {
-                    const fallback = genAI.getGenerativeModel({ model: fallbackModel });
-                    return await withTimeout(fallback.generateContent(prompt), timeoutMs, `Gemini API (${fallbackModel})`);
-                } catch (fallbackError: any) {
-                    console.error(`❌ Fallback model ${fallbackModel} also failed:`, fallbackError.message);
-                    throw error;
-                }
+
+            // Non-transient errors (e.g. auth issue): stop retrying primary immediately.
+            if (!isTransient) {
+                console.error(`❌ Non-transient error on primary model (${primaryModel}):`, errorMsg);
+                break;
             }
-            // For non-transient errors (e.g. invalid key), throw immediately without retrying.
-            throw error;
         }
     }
-    throw new Error("Failed to generate content: Unknown error");
+
+    // If primary model failed/timed out, invoke the fallback model if available and distinct
+    const effectiveFallback = (fallbackModel && fallbackModel !== primaryModel) 
+        ? fallbackModel 
+        : (primaryModel === 'gemini-1.5-flash' ? 'gemini-2.0-flash' : 'gemini-1.5-flash');
+
+    if (effectiveFallback) {
+        console.warn(`⚠️ Primary model (${primaryModel}) unavailable. Invoking fallback model (${effectiveFallback})...`);
+        try {
+            const fallback = genAI.getGenerativeModel({ model: effectiveFallback });
+            return await withTimeout(fallback.generateContent(prompt), timeoutMs, `Gemini API (${effectiveFallback})`);
+        } catch (fallbackError: any) {
+            console.error(`❌ Fallback model ${effectiveFallback} also failed:`, fallbackError.message);
+            throw new Error(
+                `Primary model (${primaryModel}) failed: ${lastPrimaryError?.message || 'unknown'}. Fallback (${effectiveFallback}) failed: ${fallbackError.message}`
+            );
+        }
+    }
+
+    throw lastPrimaryError || new Error("Failed to generate content: Unknown error");
 }
 
 // ----------------------------------------------------------------------------

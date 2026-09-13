@@ -26,10 +26,10 @@ import axios from 'axios';
 const execPromise = util.promisify(exec);
 
 // Maximum cumulative character size of file contents sent to Gemini AI (budget limit).
-// WHAT: Limits total prompt context characters to ~120,000 characters (~30k tokens).
-// WHY: Prevents token overflow, excessive API costs, and context dilution.
+// WHAT: Limits total prompt context characters to ~90,000 characters (~22k tokens).
+// WHY: Prevents token overflow, excessive API latency/timeouts, and context dilution.
 // HOW: Used in `compressPromptContext()` to decide whether to send full content or structural summaries.
-const MAX_AI_CONTEXT_CHARS = 120000; 
+const MAX_AI_CONTEXT_CHARS = Number(process.env.MAX_AI_CONTEXT_CHARS) || 90000; 
 
 // ----------------------------------------------------------------------------
 // DATA MODELS / INTERFACES
@@ -962,10 +962,20 @@ export function compressPromptContext(files: ScannedFile[]): ScannedFile[] {
     for (const file of sorted) {
         const charLength = file.content.length;
         
-        if (file.priority === 'HIGH' || (currentLength + charLength < MAX_AI_CONTEXT_CHARS)) {
-            // Keep full content
+        if (currentLength + charLength <= MAX_AI_CONTEXT_CHARS) {
+            // Fits entirely within budget: keep full content
             result.push(file);
             currentLength += charLength;
+        } else if (file.priority === 'HIGH' && currentLength < MAX_AI_CONTEXT_CHARS) {
+            // High-priority file exceeding remaining budget: cleanly slice to fit remaining budget
+            const allowedChars = Math.min(charLength, Math.max(3000, MAX_AI_CONTEXT_CHARS - currentLength));
+            const truncatedContent = file.content.slice(0, allowedChars) + `\n// [TRUNCATED ${charLength - allowedChars} CHARS FOR CONTEXT BUDGET]`;
+            result.push({
+                ...file,
+                content: truncatedContent,
+                size: truncatedContent.length
+            });
+            currentLength += truncatedContent.length;
         } else {
             // Out of budget - abstract/summarize file to keep structural integrity without burning tokens
             const abstractedContent = `// [CONTENT OMITTED FOR TOKEN BUDGET - STRUCTURAL OVERVIEW ONLY]
