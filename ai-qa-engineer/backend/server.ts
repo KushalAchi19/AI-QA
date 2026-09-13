@@ -260,7 +260,7 @@ app.get('/api/user/repos', async (req, res) => {
 import { analyzeRepository } from './services/repoAnalyzer';
 import { generateTests, analyzeErrorSnippet } from './services/testGenerator';
 import { runPlaywrightTest, prepareEnvironment } from './services/testRunner';
-import { initDb, createAnalysis, updateAnalysis, getAnalyses, deleteAnalysis } from './services/database';
+import { initDb, createAnalysis, updateAnalysis, getAnalyses, getAnalysisById, deleteAnalysis } from './services/database';
 import { fixFailedTest } from './services/agenticFixer';
 
 // ----------------------------------------------------------------------------
@@ -311,6 +311,15 @@ app.get('/', (req, res) => {
     );
 });
 
+// Dedicated health endpoint for monitoring, keepalive pingers, and cold-start warmup.
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Endpoint: Retrieves all previous analyses filtered by clientId.
 // WHAT: Reads records from `backend/ai-qa.json` for the given client identifier.
 // WHY: Populates the "Audit History" sidebar in the frontend.
@@ -324,17 +333,33 @@ app.get('/api/analyses', async (req: Request, res: Response, next: NextFunction)
     }
 });
 
+// Endpoint: Retrieves a single analysis record by ID.
+// WHAT: Allows the frontend to fetch latest status as a fallback when SSE is dropped or unavailable.
+app.get('/api/analyses/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const id = req.params.id as string;
+        const record = await getAnalysisById(id);
+        if (!record) {
+            return res.status(404).json({ error: 'Analysis not found' });
+        }
+        res.json(record);
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Endpoint: Server-Sent Events (SSE) streaming connection route.
 // WHAT: Keeps an HTTP connection open with `text/event-stream` headers.
-// WHY: Delivers real-time progress notifications to the frontend without polling loops.
-// HOW: Removes client from `sseClients` map when connection is closed.
-app.get('/api/analyses/:id/stream', (req: Request, res: Response) => {
+// WHY: Delivers real-time progress notifications to the frontend.
+// HOW: Includes keepalive heartbeat pings and pushes the current state immediately upon connection.
+app.get('/api/analyses/:id/stream', async (req: Request, res: Response) => {
     const id = req.params.id as string;
     
-    // Set headers required for Server-Sent Events.
+    // Set headers required for Server-Sent Events and prevent reverse proxy buffering.
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
     // Register this response connection in the SSE registry.
@@ -343,8 +368,51 @@ app.get('/api/analyses/:id/stream', (req: Request, res: Response) => {
     }
     sseClients.get(id)!.push(res);
 
-    // Clean up registry when client disconnects.
+    // 1. Immediately push the current state to the client upon connection.
+    try {
+        const currentRecord = await getAnalysisById(id);
+        if (currentRecord) {
+            const percentMap: Record<string, number> = {
+                'STARTED': 10,
+                'ANALYSING': 30,
+                'GENERATING_TESTS': 65,
+                'TESTS_GENERATED': 85,
+                'RUNNING_TESTS': 90,
+                'COMPLETED': 100,
+                'FAILED': 100
+            };
+            const defaultPercent = percentMap[currentRecord.status] || 15;
+            res.write(`data: ${JSON.stringify({
+                status: currentRecord.status,
+                percent: defaultPercent,
+                details: currentRecord.status === 'COMPLETED' ? 'Analysis completed.' :
+                         currentRecord.status === 'FAILED' ? (currentRecord.playwright_output || 'Analysis failed.') :
+                         'Processing analysis pipeline...'
+            })}\n\n`);
+
+            // If the job is already finished or failed, close the connection immediately.
+            if (currentRecord.status === 'COMPLETED' || currentRecord.status === 'FAILED') {
+                res.end();
+                return;
+            }
+        }
+    } catch (dbErr) {
+        console.warn(`Could not push initial state for ${id}:`, dbErr);
+    }
+
+    // 2. Setup periodic keepalive heartbeat ping every 15 seconds.
+    // Prevents Cloudflare and Render reverse proxies from timing out idle SSE streams.
+    const heartbeat = setInterval(() => {
+        try {
+            res.write(': keepalive\n\n');
+        } catch {
+            clearInterval(heartbeat);
+        }
+    }, 15000);
+
+    // Clean up registry and heartbeat when client disconnects.
     req.on('close', () => {
+        clearInterval(heartbeat);
         const clients = sseClients.get(id);
         if (clients) {
             sseClients.set(id, clients.filter(c => c !== res));

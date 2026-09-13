@@ -223,6 +223,9 @@ export default function App() {
   // Reference to hidden HTML file input element.
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Cold-start detection state for Render free-tier instance.
+  const [isServerWaking, setIsServerWaking] = useState(false);
+
   // GitHub Personal Access Token state (persisted in localStorage).
   const [githubToken, setGithubToken] = useState(localStorage.getItem('ai-qa-github-token') || '');
   useEffect(() => { localStorage.setItem('ai-qa-github-token', githubToken); }, [githubToken]);
@@ -231,6 +234,20 @@ export default function App() {
   const activeItem = useMemo(() => runs.find(r => r.id === activeItemId) || null, [runs, activeItemId]);
   // Memoized parsed metrics for the active item.
   const metrics = useMemo(() => activeItem ? parseAnalysisMetrics(activeItem) : null, [activeItem]);
+
+  // --------------------------------------------------------------------------
+  // COLD-START DETECTION & ENGINE WARM-UP
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    let timer = setTimeout(() => setIsServerWaking(true), 2500);
+    fetch(`${API_URL}/api/health`)
+      .then(res => res.ok ? res.json() : null)
+      .catch(() => null)
+      .finally(() => {
+        clearTimeout(timer);
+        setIsServerWaking(false);
+      });
+  }, []);
 
   // --------------------------------------------------------------------------
   // HISTORY FETCHING & LOCAL VAULT SYNCHRONIZATION
@@ -266,14 +283,36 @@ export default function App() {
       localVault.forEach(vaultRun => {
         if (!mergedRuns.find(m => m.id === vaultRun.id)) mergedRuns.push(vaultRun);
       });
+
+      // Guard: Automatically recover jobs stuck in running state for > 4 minutes (e.g. after server reboot)
+      const now = Date.now();
+      mergedRuns.forEach(r => {
+        if (r.status !== 'COMPLETED' && r.status !== 'FAILED') {
+          const createdAt = new Date(r.created_at).getTime();
+          if (now - createdAt > 4 * 60 * 1000) {
+            r.status = 'FAILED';
+            r.playwright_output = r.playwright_output || 'Analysis timed out (exceeded 4 minutes). The server may have restarted or been interrupted. Please click Cancel or retry.';
+            r.progressPercent = 100;
+          }
+        }
+      });
+
       mergedRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       
       // Avoid re-renders if data has not changed.
       setRuns(prev => {
-        const isSame = prev.length === mergedRuns.length && prev.every((item, i) => 
-          item.id === mergedRuns[i].id && item.status === mergedRuns[i].status && item.playwright_output === mergedRuns[i].playwright_output
+        // Keep any active in-memory runs that might not have reached server storage yet
+        const fullRuns = [...mergedRuns];
+        prev.forEach(p => {
+          if (!fullRuns.some(f => f.id === p.id)) {
+            fullRuns.unshift(p);
+          }
+        });
+
+        const isSame = prev.length === fullRuns.length && prev.every((item, i) => 
+          item.id === fullRuns[i].id && item.status === fullRuns[i].status && item.playwright_output === fullRuns[i].playwright_output && item.progressPercent === fullRuns[i].progressPercent
         );
-        return isSame ? prev : mergedRuns;
+        return isSame ? prev : fullRuns;
       });
     } catch (e) { console.error("History fetch error:", e); }
   }, []);
@@ -282,45 +321,119 @@ export default function App() {
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
   // --------------------------------------------------------------------------
-  // SERVER-SENT EVENTS (SSE) STREAMING SUBSCRIPTION
+  // DUAL-LAYER REAL-TIME PROGRESS TRACKING (SSE + AUTO-RECONNECT + POLLING FALLBACK)
   // --------------------------------------------------------------------------
   // Subscribes to real-time progress events when an active analysis is selected.
-  // WHAT: Replaces inefficient HTTP polling loops with a persistent EventSource stream.
-  // WHY: Updates progress percentages (0% to 100%) and status messages with sub-second latency.
-  // HOW: Closes the stream automatically when status reaches 'COMPLETED' or 'FAILED'.
+  // Resilient against Render sleep, proxy dropouts, and connection interruptions.
   useEffect(() => {
     if (!activeItemId) return;
     const item = runs.find(r => r.id === activeItemId);
     if (!item || item.status === 'COMPLETED' || item.status === 'FAILED') return;
 
-    // Connect to backend SSE endpoint.
-    const eventSource = new EventSource(`${API_URL}/api/analyses/${activeItemId}/stream`);
-    
-    // Process incoming SSE events from backend broadcastProgress().
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setRuns(prev => prev.map(run => run.id === activeItemId ? { 
-        ...run, 
-        status: data.status, 
-        progressPercent: data.percent,
-        progressDetails: data.details
-      } : run));
+    let eventSource: EventSource | null = null;
+    let reconnectTimeout: any = null;
+    let isSubscribed = true;
 
-      // Close stream once job completes.
-      if (data.status === 'COMPLETED' || data.status === 'FAILED') {
-        eventSource.close();
-        setTimeout(fetchHistory, 1000);
+    const connectSSE = () => {
+      if (!isSubscribed) return;
+      try {
+        eventSource = new EventSource(`${API_URL}/api/analyses/${activeItemId}/stream`);
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            setRuns(prev => prev.map(run => run.id === activeItemId ? { 
+              ...run, 
+              status: data.status, 
+              progressPercent: data.percent,
+              progressDetails: data.details
+            } : run));
+
+            // Close stream once job completes or fails.
+            if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+              if (eventSource) eventSource.close();
+              fetchHistory();
+            }
+          } catch (err) {
+            console.warn("SSE parse error:", err);
+          }
+        };
+
+        // On error (e.g. proxy timeout or server cold start drop), attempt reconnection after 3 seconds
+        eventSource.onerror = () => {
+          if (eventSource) eventSource.close();
+          if (isSubscribed) {
+            reconnectTimeout = setTimeout(connectSSE, 3000);
+          }
+        };
+      } catch (e) {
+        console.warn("EventSource creation error:", e);
       }
     };
 
-    // Close stream on error to prevent reconnection storms.
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
+    connectSSE();
 
-    // Clean up event source when active item changes or component unmounts.
-    return () => eventSource.close();
+    return () => {
+      isSubscribed = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (eventSource) eventSource.close();
+    };
   }, [activeItemId, fetchHistory]);
+
+  // Secondary Polling Fallback: Checks every 3s while any analysis is in progress.
+  // Guarantees UI updates even if SSE is completely blocked by Cloudflare/Render proxies.
+  useEffect(() => {
+    const hasRunningJob = runs.some(r => r.status !== 'COMPLETED' && r.status !== 'FAILED');
+    if (!hasRunningJob) return;
+
+    const interval = setInterval(async () => {
+      try {
+        if (activeItemId) {
+          const current = runs.find(r => r.id === activeItemId);
+          if (current && current.status !== 'COMPLETED' && current.status !== 'FAILED') {
+            const res = await fetch(`${API_URL}/api/analyses/${activeItemId}`);
+            if (res.ok) {
+              const updated = await res.json();
+              if (updated && updated.status) {
+                setRuns(prev => prev.map(run => {
+                  if (run.id === activeItemId) {
+                    const percentMap: Record<string, number> = {
+                      'STARTED': 10,
+                      'ANALYSING': 35,
+                      'GENERATING_TESTS': 65,
+                      'TESTS_GENERATED': 85,
+                      'RUNNING_TESTS': 90,
+                      'COMPLETED': 100,
+                      'FAILED': 100
+                    };
+                    return {
+                      ...run,
+                      ...updated,
+                      progressPercent: updated.status === 'COMPLETED' || updated.status === 'FAILED' ? 100 : (percentMap[updated.status] || run.progressPercent || 20),
+                      progressDetails: updated.status === 'COMPLETED' ? 'Analysis completed.' :
+                                       updated.status === 'FAILED' ? (updated.playwright_output || 'Analysis failed.') :
+                                       run.progressDetails
+                    };
+                  }
+                  return run;
+                }));
+
+                if (updated.status === 'COMPLETED' || updated.status === 'FAILED') {
+                  fetchHistory();
+                }
+              }
+            }
+          }
+        } else {
+          await fetchHistory();
+        }
+      } catch (pollErr) {
+        console.warn("Polling fallback error:", pollErr);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [runs, activeItemId, fetchHistory]);
 
   // Check authenticated GitHub user on load.
   useEffect(() => {

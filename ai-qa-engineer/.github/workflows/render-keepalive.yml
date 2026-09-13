@@ -1,0 +1,13 @@
+name: Render Keepalive
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render health endpoint
+        run: |
+          curl -s https://ai-quality-assurance-engineer.onrender.com/api/health || echo "Health ping failed"
