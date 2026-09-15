@@ -16,16 +16,28 @@ Before starting, ensure you have the following installed:
 ## ⚙️ Project Setup
 
 ### 1. Configure Backend Environment
-Navigate to the `backend` directory and create a `.env` file:
+Navigate to the `backend` directory and create a `.env` file (refer to `backend/.env.example`):
 
-```bash
-cd backend
-# Create or edit .env
-GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+```env
 PORT=5000
+NODE_ENV=development
+FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:5000
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+GITHUB_WORKER_TOKEN=YOUR_GITHUB_PAT
+GITHUB_CLIENT_ID=YOUR_GITHUB_OAUTH_CLIENT_ID
+GITHUB_CLIENT_SECRET=YOUR_GITHUB_OAUTH_CLIENT_SECRET
+SESSION_SECRET=your_session_secret
 ```
 
-### 2. Install Dependencies
+### 2. Configure Frontend Environment
+In the `frontend` directory, create a `.env.local` file for local development:
+
+```env
+VITE_API_URL=http://localhost:5000
+```
+
+### 3. Install Dependencies
 Install the required packages for both the backend and frontend:
 
 ```bash
@@ -36,19 +48,13 @@ npm install
 # In frontend
 cd ../frontend
 npm install
-
-# 3. Configure Frontend Environment
-Create a `.env` file in the `frontend` directory with:
-```bash
-VITE_API_URL=https://ai-quality-assurance-engineer.onrender.com
-```
 ```
 
 ---
 
-## 🚀 Running the Project
+## 🚀 Running the Project Locally
 
-You need to run both the **Backend** and the **Frontend** simultaneously.
+Run both the **Backend** and the **Frontend** simultaneously:
 
 ### Step 1: Start the Backend (API Engine)
 Open a terminal and run:
@@ -56,8 +62,7 @@ Open a terminal and run:
 cd backend
 npm run dev
 ```
-The backend will start at `https://ai-quality-assurance-engineer.onrender.com`.
-
+**LOCAL BACKEND:** `http://localhost:5000`
 
 ### Step 2: Start the Frontend (Dashboard)
 Open a **new** terminal and run:
@@ -65,7 +70,33 @@ Open a **new** terminal and run:
 cd frontend
 npm run dev
 ```
-The dashboard will start at `http://localhost:5173`.
+**LOCAL FRONTEND:** `http://localhost:5173`
+
+The local frontend will communicate directly with `http://localhost:5000` via `frontend/.env.local`.
+
+---
+
+## ☁️ Cloud Deployment Configuration
+
+The same codebase deploys cleanly to production without code changes:
+
+### Vercel (Frontend)
+- **Production URL:** `https://ai-quality-assurance-engineer.vercel.app`
+- **Environment Variable in Vercel:**
+  - `VITE_API_URL` = `https://ai-quality-assurance-engineer.onrender.com`
+
+### Render (Backend)
+- **Production URL:** `https://ai-quality-assurance-engineer.onrender.com`
+- **Environment Variables in Render:**
+  - `FRONTEND_URL` = `https://ai-quality-assurance-engineer.vercel.app`
+  - `BACKEND_URL` = `https://ai-quality-assurance-engineer.onrender.com`
+  - `PORT` = `3030` (or Render default)
+  - `NODE_ENV` = `production`
+  - `GEMINI_API_KEY` = `...`
+  - `GITHUB_CLIENT_ID` = `...`
+  - `GITHUB_CLIENT_SECRET` = `...`
+  - `SESSION_SECRET` = `...`
+  - `GITHUB_WORKER_TOKEN` = `...`
 
 ---
 
